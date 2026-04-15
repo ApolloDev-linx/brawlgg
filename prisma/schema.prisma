@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Brawler {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  role      String
+  type      String
+  hp        Int
+  iconUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mapStats       MapBrawlerStat[]
+  counterAs      CounterMatchup[]  @relation("BrawlerCounters")
+  counteredBy    CounterMatchup[]  @relation("CounteredBy")
+  metaSnapshots  MetaSnapshot[]
+  playerBrawlers PlayerBrawler[]
+
+  @@index([type])
+  @@index([name])
+}
+
+model GameMode {
+  id   String @id @default(uuid())
+  name String @unique
+  icon String
+  maps Map[]
+}
+
+model Map {
+  id         String  @id @default(uuid())
+  name       String
+  gameModeId String
+  imageUrl   String?
+  active     Boolean @default(true)
+
+  gameMode     GameMode         @relation(fields: [gameModeId], references: [id])
+  brawlerStats MapBrawlerStat[]
+
+  @@index([gameModeId])
+}
+
+model MapBrawlerStat {
+  id           String   @id @default(uuid())
+  mapId        String
+  brawlerId    String
+  winRate      Float
+  pickRate     Float
+  banRate      Float
+  tier         String
+  pickCategory String?
+  computedAt   DateTime @default(now())
+
+  map     Map     @relation(fields: [mapId], references: [id])
+  brawler Brawler @relation(fields: [brawlerId], references: [id])
+
+  @@unique([mapId, brawlerId])
+  @@index([mapId])
+  @@index([brawlerId])
+}
+
+model CounterMatchup {
+  id             String @id @default(uuid())
+  brawlerId      String
+  counterId      String
+  advantageScore Float
+  reason         String
+
+  brawler Brawler @relation("BrawlerCounters", fields: [brawlerId], references: [id])
+  counter Brawler @relation("CounteredBy", fields: [counterId], references: [id])
+
+  @@unique([brawlerId, counterId])
+}
+
+model MetaSnapshot {
+  id           String   @id @default(uuid())
+  brawlerId    String
+  winRate      Float
+  pickRate     Float
+  banRate      Float
+  tier         String
+  snapshotDate DateTime @db.Date
+
+  brawler Brawler @relation(fields: [brawlerId], references: [id])
+
+  @@unique([brawlerId, snapshotDate])
+  @@index([snapshotDate])
+}
+
+model Player {
+  id              String   @id @default(uuid())
+  tag             String   @unique
+  name            String
+  trophies        Int
+  highestTrophies Int
+  clubName        String?
+  playstyle       String?
+  lastSynced      DateTime @default(now())
+
+  brawlers PlayerBrawler[]
+
+  @@index([tag])
+}
+
+model PlayerBrawler {
+  id              String @id @default(uuid())
+  playerId        String
+  brawlerId       String
+  trophies        Int
+  powerLevel      Int
+  personalWinRate Float?
+
+  player  Player  @relation(fields: [playerId], references: [id])
+  brawler Brawler @relation(fields: [brawlerId], references: [id])
+
+  @@unique([playerId, brawlerId])
+}
