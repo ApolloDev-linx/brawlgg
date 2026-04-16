@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, SEED_BRAWLERS } from "@/lib/constants";
 import { analyzePlaystyle } from "@/services/playstyle-analyzer";
@@ -11,7 +12,12 @@ export async function GET(
 
   try {
     const data = await cached(`api:player:${tag}`, CACHE_TTL.PLAYER, async () => {
-      // Try the official Brawl Stars API first
+      const dbBrawlers = await prisma.brawler.findMany().catch(() => []);
+      const typeLookup: Record<string, string> = {};
+      for (const b of dbBrawlers) {
+        typeLookup[b.name.toUpperCase()] = b.type;
+      }
+
       if (process.env.BRAWL_STARS_API_KEY) {
         try {
           const { fetchPlayer } = await import("@/services/brawlstars-api");
@@ -22,7 +28,7 @@ export async function GET(
             .slice(0, 6)
             .map((b) => ({
               name: b.name,
-              brawlerType: "lane" as string, // Would need a lookup table
+              brawlerType: typeLookup[b.name.toUpperCase()] || "lane",
               trophies: b.trophies,
               power: b.power,
               brawlerName: b.name,
@@ -64,8 +70,10 @@ export async function GET(
         }
       }
 
-      // Generate mock data for demonstration
-      return generateMockPlayer(tag);
+      const brawlerPool = dbBrawlers.length > 0
+        ? dbBrawlers.map((b) => ({ name: b.name, type: b.type }))
+        : SEED_BRAWLERS.map((b) => ({ name: b.name, type: b.type }));
+      return generateMockPlayer(tag, brawlerPool);
     });
 
     return NextResponse.json(data);
@@ -77,12 +85,15 @@ export async function GET(
   }
 }
 
-function generateMockPlayer(tag: string) {
+function generateMockPlayer(
+  tag: string,
+  brawlerPool: { name: string; type: string }[]
+) {
   const seed = tag.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
   const rng = (min: number, max: number) =>
     Math.round(min + ((seed * 9301 + 49297) % 233280) / 233280 * (max - min));
 
-  const shuffled = [...SEED_BRAWLERS].sort(
+  const shuffled = [...brawlerPool].sort(
     () => ((seed * 13) % 7) / 7 - 0.5
   );
   const topBrawlers = shuffled.slice(0, 6).map((b) => ({
@@ -129,9 +140,7 @@ function generateMockPlayer(tag: string) {
     name: "Player" + (seed % 9999),
     trophies: totalTrophies,
     highestTrophies: totalTrophies + rng(500, 2000),
-    clubName: ["StarForce", "NovaEsports", "TribeGaming", "Omen Elite"][
-      seed % 4
-    ],
+    clubName: ["StarForce", "NovaEsports", "TribeGaming", "Omen Elite"][seed % 4],
     level: rng(80, 150),
     wins: rng(3000, 10000),
     playstyle: analysis.playstyle,
