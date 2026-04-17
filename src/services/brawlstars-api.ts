@@ -29,26 +29,19 @@ async function apiFetch<T>(path: string): Promise<T> {
     next: { revalidate: 300 },
   });
 
-  // Track rate limit headers
   const remaining = res.headers.get("x-ratelimit-remaining");
   const reset = res.headers.get("x-ratelimit-reset");
   if (remaining) rateLimit.remaining = parseInt(remaining, 10);
   if (reset) rateLimit.resetAt = parseInt(reset, 10) * 1000;
 
   if (!res.ok) {
-    if (res.status === 429) {
-      throw new Error("Rate limited by Brawl Stars API. Try again shortly.");
-    }
-    if (res.status === 404) {
-      throw new Error("Not found");
-    }
+    if (res.status === 429) throw new Error("Rate limited by Brawl Stars API");
+    if (res.status === 404) throw new Error("Not found");
     throw new Error(`Brawl Stars API error: ${res.status}`);
   }
 
   return res.json();
 }
-
-// -- Public methods --
 
 export interface BSPlayer {
   tag: string;
@@ -79,6 +72,14 @@ export interface BSBrawler {
   gadgets: { id: number; name: string }[];
 }
 
+export interface BSLeaderboardPlayer {
+  tag: string;
+  name: string;
+  trophies: number;
+  rank: number;
+  club?: { name: string };
+}
+
 export async function fetchPlayer(tag: string): Promise<BSPlayer> {
   const encoded = encodeURIComponent("#" + normalizeTag(tag));
   return apiFetch<BSPlayer>(`/players/${encoded}`);
@@ -94,8 +95,18 @@ export async function fetchBrawlers(): Promise<{ items: BSBrawler[] }> {
 }
 
 /**
- * Check if the API key is configured and working.
+ * Fetch top 200 players from the global leaderboard.
+ * countryCode = "global" for worldwide, or "US", "GB", "KR" etc for regional
  */
+export async function fetchLeaderboard(
+  countryCode = "global"
+): Promise<BSLeaderboardPlayer[]> {
+  const data = await apiFetch<{ items: BSLeaderboardPlayer[] }>(
+    `/rankings/${countryCode}/players?limit=200`
+  );
+  return data.items || [];
+}
+
 export async function healthCheck(): Promise<boolean> {
   try {
     await fetchBrawlers();

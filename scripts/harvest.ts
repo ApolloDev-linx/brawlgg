@@ -1,0 +1,226 @@
+/**
+ * scripts/harvest.ts
+ *
+ * Run this locally whenever you want to bulk-seed real battle data.
+ *
+ * Usage:
+ *   npx tsx scripts/harvest.ts
+ *
+ * Make sure your .env has BRAWL_STARS_API_KEY and DATABASE_URL set.
+ * Typically takes 5-15 minutes depending on API rate limits.
+ */
+
+import { PrismaClient } from "@prisma/client";
+import { config } from "dotenv";
+
+// Load .env before anything else
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
+
+// Inline the harvester logic here so we don't need path aliases
+const BASE_URL = "https://api.brawlstars.com/v1";
+
+async function apiFetch<T>(path: string): Promise<T> {
+  const apiKey = process.env.BRAWL_STARS_API_KEY;
+  if (!apiKey) throw new Error("BRAWL_STARS_API_KEY not set in .env");
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+  });
+
+  if (res.status === 429) {
+    console.log("[harvest] Rate limited, waiting 10s...");
+    await sleep(10_000);
+    return apiFetch(path);
+  }
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const COMPETITIVE_MODES = new Set([
+  "gemGrab", "brawlBall", "bounty", "heist", "hotZone", "knockout", "siege",
+]);
+
+async function fetchLeaderboard(countryCode = "global"): Promise<string[]> {
+  const data = await apiFetch<{ items: { tag: string }[] }>(
+    `/rankings/${countryCode}/players?limit=200`
+  );
+  return (data.items || []).map((p) => p.tag.replace(/^#/, ""));
+}
+
+async function fetchBattleLog(tag: string): Promise<any[]> {
+  const encoded = encodeURIComponent("#" + tag);
+  const data = await apiFetch<{ items: any[] }>(`/players/${encoded}/battlelog`);
+  return data.items || [];
+}
+
+async function processPlayer(
+  prisma: PrismaClient,
+  tag: string,
+  brawlerIdByName: Record<string, string>
+): Promise<{ saved: number; skipped: number; chainTags: string[] }> {
+  const out = { saved: 0, skipped: 0, chainTags: [] as string[] };
+
+  let items: any[];
+  try {
+    items = await fetchBattleLog(tag);
+  } catch {
+    return out;
+  }
+
+  for (const item of items) {
+    try {
+      const battle = item.battle;
+      const event = item.event;
+
+      if (!event?.map || !battle?.mode) { out.skipped++; continue; }
+      if (!COMPETITIVE_MODES.has(battle.mode)) { out.skipped++; continue; }
+      if (battle.type === "friendly") { out.skipped++; continue; }
+
+      const battleResult: string = battle.result;
+      if (!battleResult) { out.skipped++; continue; }
+
+      const battleTime = new Date(item.battleTime);
+      const mapName: string = event.map;
+      const gameMode: string = battle.mode;
+      const teams: any[][] = battle.teams || [];
+      const starPlayerTag: string | undefined = battle.starPlayer?.tag;
+
+      for (const team of teams) {
+        for (const player of team) {
+          if (!player?.brawler?.name || !player?.tag) continue;
+
+          const cleanTag = (player.tag as string).replace(/^#/, "");
+          if (cleanTag !== tag) out.chainTags.push(cleanTag);
+
+          const brawlerName = (player.brawler.name as string)
+            .toLowerCase()
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+          const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
+          const isStarPlayer = player.tag === starPlayerTag;
+          const teamIndex = teams.indexOf(team);
+          let playerResult = battleResult;
+          if (battleResult === "victory" && teamIndex === 1) playerResult = "defeat";
+          if (battleResult === "defeat" && teamIndex === 1) playerResult = "victory";
+
+          try {
+            await prisma.battleRecord.upsert({
+              where: {
+                battleTime_sourceTag_brawlerName: {
+                  battleTime,
+                  sourceTag: tag,
+                  brawlerName,
+                },
+              },
+              update: {},
+              create: {
+                battleTime,
+                mapName,
+                gameMode,
+                result: playerResult,
+                brawlerName,
+                brawlerId,
+                isStarPlayer,
+                sourceTag: tag,
+              },
+            });
+            out.saved++;
+          } catch {
+            out.skipped++;
+          }
+        }
+      }
+    } catch {
+      out.skipped++;
+    }
+  }
+
+  return out;
+}
+
+async function main() {
+  const prisma = new PrismaClient();
+  console.log("=== BrawlGG Leaderboard Harvester ===\n");
+
+  // Build brawler lookup
+  const dbBrawlers = await prisma.brawler.findMany({ select: { id: true, name: true } });
+  const brawlerIdByName: Record<string, string> = {};
+  for (const b of dbBrawlers) brawlerIdByName[b.name.toLowerCase()] = b.id;
+  console.log(`Loaded ${dbBrawlers.length} brawlers from DB\n`);
+
+  // Collect leaderboard tags
+  const regions = ["global", "US", "GB", "KR", "BR"];
+  const seenTags = new Set<string>();
+  const leaderboardTags: string[] = [];
+
+  for (const region of regions) {
+    try {
+      process.stdout.write(`Fetching ${region} leaderboard... `);
+      const tags = await fetchLeaderboard(region);
+      let added = 0;
+      for (const t of tags) {
+        if (!seenTags.has(t)) { seenTags.add(t); leaderboardTags.push(t); added++; }
+      }
+      console.log(`${added} new players`);
+      await sleep(300);
+    } catch (err: any) {
+      console.log(`failed (${err.message})`);
+    }
+  }
+
+  console.log(`\nTotal leaderboard players: ${leaderboardTags.length}\n`);
+
+  // Process leaderboard
+  let totalSaved = 0;
+  let totalSkipped = 0;
+  const chainPool = new Set<string>();
+
+  for (let i = 0; i < leaderboardTags.length; i++) {
+    const tag = leaderboardTags[i];
+    const { saved, skipped, chainTags } = await processPlayer(prisma, tag, brawlerIdByName);
+    totalSaved += saved;
+    totalSkipped += skipped;
+    for (const ct of chainTags) { if (!seenTags.has(ct)) chainPool.add(ct); }
+
+    process.stdout.write(
+      `\r[Leaderboard] ${i + 1}/${leaderboardTags.length} players | Saved: ${totalSaved} battles`
+    );
+    await sleep(200);
+  }
+
+  console.log(`\n\nLeaderboard sweep done. Saved ${totalSaved} battles.\n`);
+
+  // Chain harvest — follow tags from those battles
+  const chainTags = Array.from(chainPool).filter((t) => !seenTags.has(t)).slice(0, 400);
+  console.log(`Chain harvesting ${chainTags.length} additional players...\n`);
+
+  for (let i = 0; i < chainTags.length; i++) {
+    const tag = chainTags[i];
+    seenTags.add(tag);
+    const { saved, skipped } = await processPlayer(prisma, tag, brawlerIdByName);
+    totalSaved += saved;
+    totalSkipped += skipped;
+
+    process.stdout.write(
+      `\r[Chain] ${i + 1}/${chainTags.length} players | Total saved: ${totalSaved} battles`
+    );
+    await sleep(200);
+  }
+
+  console.log(`\n\nChain harvest done.\n`);
+  console.log(`=== Harvest Summary ===`);
+  console.log(`  Total battles saved: ${totalSaved}`);
+  console.log(`  Total skipped:       ${totalSkipped}`);
+  console.log(`  Players processed:   ${seenTags.size}`);
+
+  await prisma.$disconnect();
+  console.log("\nDone! Run the aggregate cron or hit /api/cron/aggregate to compute real stats.");
+}
+
+main().catch((err) => {
+  console.error("\nHarvest failed:", err);
+  process.exit(1);
+});
