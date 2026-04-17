@@ -49,15 +49,25 @@ interface NormalizedBrawler {
   externalId: number;
 }
 
+/**
+ * Normalize any casing from the API (e.g. "BULL", "el primo") to title case ("Bull", "El Primo").
+ */
+function toTitleCase(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
   const className = (raw.class?.name || "").toLowerCase();
-  const override = NAME_OVERRIDES[raw.name];
+  const name = toTitleCase(raw.name); // always normalize to title case
+  const override = NAME_OVERRIDES[name];
 
   return {
-    name: raw.name,
+    name,
     role: override?.role || CLASS_TO_ROLE[className] || "Damage",
     type: override?.type || CLASS_TO_TYPE[className] || "lane",
-    hp: estimateHp(className, raw.name),
+    hp: estimateHp(className, name),
     iconUrl: raw.imageUrl2 || raw.imageUrl || null,
     externalId: raw.id,
   };
@@ -121,7 +131,7 @@ export async function syncBrawlerData(
     );
     result.errors.push(`API fetch failed: ${err.message}`);
     normalized = SEED_BRAWLERS.map((b) => ({
-      name: b.name,
+      name: b.name, // SEED_BRAWLERS are already title-cased
       role: b.role,
       type: b.type as BrawlerType,
       hp: b.hp,
@@ -135,13 +145,16 @@ export async function syncBrawlerData(
 
   for (const brawler of normalized) {
     try {
-      const existing = await prisma.brawler.findUnique({
-        where: { name: brawler.name },
+      // Use a true upsert — no more find+create race condition
+      const existing = await prisma.brawler.findFirst({
+        where: { name: { equals: brawler.name, mode: "insensitive" } },
       });
+
       if (existing) {
         await prisma.brawler.update({
-          where: { name: brawler.name },
+          where: { id: existing.id },
           data: {
+            name: brawler.name, // normalize the name in DB too
             role: brawler.role,
             type: brawler.type,
             hp: brawler.hp,
@@ -211,6 +224,7 @@ export async function syncCounterMatchups(
       }
     }
   }
+
   return { total, errors };
 }
 
@@ -248,5 +262,6 @@ export async function syncMapBrawlerStats(
       count++;
     }
   }
+
   return count;
 }

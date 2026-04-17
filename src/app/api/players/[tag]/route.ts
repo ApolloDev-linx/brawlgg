@@ -1,8 +1,18 @@
+/**
+ * /api/players/[tag]/route.ts
+ *
+ * Player lookup — also fire-and-forgets a battle log save in the background
+ * so every lookup seeds our real stats dataset automatically.
+ */
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, SEED_BRAWLERS } from "@/lib/constants";
 import { analyzePlaystyle } from "@/services/playstyle-analyzer";
+import { saveBattleLog } from "@/services/battle-log-service";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   _request: Request,
@@ -22,6 +32,16 @@ export async function GET(
         try {
           const { fetchPlayer } = await import("@/services/brawlstars-api");
           const player = await fetchPlayer(tag);
+
+          // 🔥 Fire-and-forget: save battle log in the background
+          // This seeds our real stats dataset without blocking the response
+          saveBattleLog(prisma, tag).then((result) => {
+            console.log(
+              `[battle-log] ${tag}: saved=${result.saved} skipped=${result.skipped} errors=${result.errors}`
+            );
+          }).catch((err) => {
+            console.warn(`[battle-log] Failed to save for ${tag}:`, err.message);
+          });
 
           const brawlerData = player.brawlers
             .sort((a, b) => b.trophies - a.trophies)
@@ -70,9 +90,11 @@ export async function GET(
         }
       }
 
-      const brawlerPool = dbBrawlers.length > 0
-        ? dbBrawlers.map((b) => ({ name: b.name, type: b.type }))
-        : SEED_BRAWLERS.map((b) => ({ name: b.name, type: b.type }));
+      const brawlerPool =
+        dbBrawlers.length > 0
+          ? dbBrawlers.map((b) => ({ name: b.name, type: b.type }))
+          : SEED_BRAWLERS.map((b) => ({ name: b.name, type: b.type }));
+
       return generateMockPlayer(tag, brawlerPool);
     });
 
@@ -91,11 +113,11 @@ function generateMockPlayer(
 ) {
   const seed = tag.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
   const rng = (min: number, max: number) =>
-    Math.round(min + ((seed * 9301 + 49297) % 233280) / 233280 * (max - min));
+    Math.round(
+      min + (((seed * 9301 + 49297) % 233280) / 233280) * (max - min)
+    );
 
-  const shuffled = [...brawlerPool].sort(
-    () => ((seed * 13) % 7) / 7 - 0.5
-  );
+  const shuffled = [...brawlerPool].sort(() => ((seed * 13) % 7) / 7 - 0.5);
   const topBrawlers = shuffled.slice(0, 6).map((b) => ({
     name: b.name,
     type: b.type,
@@ -115,13 +137,8 @@ function generateMockPlayer(
 
   let playstyle = "balanced";
   let playstyleColor = "#85B7EB";
-  if (tanks >= 3) {
-    playstyle = "aggressive";
-    playstyleColor = "#F09595";
-  } else if (snipers >= 3) {
-    playstyle = "passive";
-    playstyleColor = "#5DCAA5";
-  }
+  if (tanks >= 3) { playstyle = "aggressive"; playstyleColor = "#F09595"; }
+  else if (snipers >= 3) { playstyle = "passive"; playstyleColor = "#5DCAA5"; }
 
   const brawlerData = topBrawlers.map((b) => ({
     brawlerId: b.name,

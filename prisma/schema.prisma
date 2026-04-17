@@ -4,9 +4,10 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")        // pooler for runtime
-  directUrl = env("DIRECT_URL")          // direct for migrate/seed
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
+
 model Brawler {
   id        String   @id @default(uuid())
   name      String   @unique
@@ -18,10 +19,11 @@ model Brawler {
   updatedAt DateTime @updatedAt
 
   mapStats       MapBrawlerStat[]
-  counterAs      CounterMatchup[]  @relation("BrawlerCounters")
-  counteredBy    CounterMatchup[]  @relation("CounteredBy")
+  counterAs      CounterMatchup[] @relation("BrawlerCounters")
+  counteredBy    CounterMatchup[] @relation("CounteredBy")
   metaSnapshots  MetaSnapshot[]
   playerBrawlers PlayerBrawler[]
+  battleRecords  BattleRecord[]
 
   @@index([type])
   @@index([name])
@@ -56,6 +58,8 @@ model MapBrawlerStat {
   banRate      Float
   tier         String
   pickCategory String?
+  sampleSize   Int      @default(0)
+  isReal       Boolean  @default(false)
   computedAt   DateTime @default(now())
 
   map     Map     @relation(fields: [mapId], references: [id])
@@ -121,4 +125,25 @@ model PlayerBrawler {
   brawler Brawler @relation(fields: [brawlerId], references: [id])
 
   @@unique([playerId, brawlerId])
+}
+
+model BattleRecord {
+  id           String   @id @default(uuid())
+  battleTime   DateTime
+  mapName      String
+  gameMode     String
+  result       String
+  brawlerName  String
+  brawlerId    String?
+  isStarPlayer Boolean  @default(false)
+  sourceTag    String
+  createdAt    DateTime @default(now())
+
+  brawler Brawler? @relation(fields: [brawlerId], references: [id])
+
+  @@unique([battleTime, sourceTag, brawlerName])
+  @@index([brawlerName])
+  @@index([mapName])
+  @@index([battleTime])
+  @@index([brawlerId])
 }
