@@ -9,27 +9,22 @@
  * Make sure your .env has BRAWL_STARS_API_KEY and DATABASE_URL set.
  * Typically takes 5-15 minutes depending on API rate limits.
  */
-
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 
-// Load .env before anything else
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
-// Inline the harvester logic here so we don't need path aliases
 const BASE_URL = "https://api.brawlstars.com/v1";
 
 async function apiFetch<T>(path: string): Promise<T> {
   const apiKey = process.env.BRAWL_STARS_API_KEY;
   if (!apiKey) throw new Error("BRAWL_STARS_API_KEY not set in .env");
-
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
   });
-
   if (res.status === 429) {
-    console.log("[harvest] Rate limited, waiting 10s...");
+    console.log("\n[harvest] Rate limited, waiting 10s...");
     await sleep(10_000);
     return apiFetch(path);
   }
@@ -39,8 +34,23 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Brawl Stars returns battleTime as "20230415T123456.000Z" — no dashes or colons.
+ * new Date() can't parse that, so we normalise it to a proper ISO string first.
+ */
+function parseBattleTime(raw: string): Date | null {
+  if (!raw) return null;
+  // Match: 20230415T123456.000Z  or  20230415T123456Z
+  const m = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\.\d+)?Z?$/);
+  if (!m) return null;
+  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ?? ""}Z`;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 const COMPETITIVE_MODES = new Set([
   "gemGrab", "brawlBall", "bounty", "heist", "hotZone", "knockout", "siege",
+  "duels", "wipeout", "payload", "basketBrawl", "volleyBrawl",
 ]);
 
 async function fetchLeaderboard(countryCode = "global"): Promise<string[]> {
@@ -77,64 +87,82 @@ async function processPlayer(
 
       if (!event?.map || !battle?.mode) { out.skipped++; continue; }
       if (!COMPETITIVE_MODES.has(battle.mode)) { out.skipped++; continue; }
-      if (battle.type === "friendly") { out.skipped++; continue; }
+      if (battle.type === "friendly" || battle.type === "practice") { out.skipped++; continue; }
 
       const battleResult: string = battle.result;
       if (!battleResult) { out.skipped++; continue; }
 
-      const battleTime = new Date(item.battleTime);
+      // Parse the non-standard BS timestamp — skip if unparseable
+      const battleTime = parseBattleTime(item.battleTime);
+      if (!battleTime) { out.skipped++; continue; }
+
       const mapName: string = event.map;
       const gameMode: string = battle.mode;
-      const teams: any[][] = battle.teams || [];
       const starPlayerTag: string | undefined = battle.starPlayer?.tag;
 
-      for (const team of teams) {
-        for (const player of team) {
-          if (!player?.brawler?.name || !player?.tag) continue;
+      // ranked uses battle.players (flat), normal uses battle.teams (nested)
+      const teams: any[][] = battle.teams || [];
+      const allPlayers: any[] = battle.players
+        ? battle.players
+        : teams.flat();
 
-          const cleanTag = (player.tag as string).replace(/^#/, "");
-          if (cleanTag !== tag) out.chainTags.push(cleanTag);
+      for (const player of allPlayers) {
+        if (!player?.brawler?.name || !player?.tag) continue;
 
-          const brawlerName = (player.brawler.name as string)
-            .toLowerCase()
-            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        const cleanTag = (player.tag as string).replace(/^#/, "");
+        if (cleanTag !== tag) out.chainTags.push(cleanTag);
 
-          const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
-          const isStarPlayer = player.tag === starPlayerTag;
-          const teamIndex = teams.indexOf(team);
-          let playerResult = battleResult;
-          if (battleResult === "victory" && teamIndex === 1) playerResult = "defeat";
-          if (battleResult === "defeat" && teamIndex === 1) playerResult = "victory";
+        const brawlerName = (player.brawler.name as string)
+          .toLowerCase()
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
-          try {
-            await prisma.battleRecord.upsert({
-              where: {
-                battleTime_sourceTag_brawlerName: {
-                  battleTime,
-                  sourceTag: tag,
-                  brawlerName,
-                },
-              },
-              update: {},
-              create: {
+        const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
+        const isStarPlayer = player.tag === starPlayerTag;
+
+        let playerResult = battleResult;
+        if (teams.length > 0) {
+          const playerTeamIndex = teams.findIndex((t) =>
+            t.some((p: any) => p.tag === player.tag)
+          );
+          if (playerTeamIndex === 1) {
+            playerResult = battleResult === "victory" ? "defeat" : "victory";
+          }
+        }
+
+        try {
+          await prisma.battleRecord.upsert({
+            where: {
+              battleTime_sourceTag_brawlerName: {
                 battleTime,
-                mapName,
-                gameMode,
-                result: playerResult,
-                brawlerName,
-                brawlerId,
-                isStarPlayer,
                 sourceTag: tag,
+                brawlerName,
               },
-            });
-            out.saved++;
-          } catch {
-            out.skipped++;
+            },
+            update: {},
+            create: {
+              battleTime,
+              mapName,
+              gameMode,
+              result: playerResult,
+              brawlerName,
+              brawlerId,
+              isStarPlayer,
+              sourceTag: tag,
+            },
+          });
+          out.saved++;
+        } catch (err: any) {
+          out.skipped++;
+          if (out.skipped <= 5) {
+            console.error(`\n[harvest] upsert error (tag=${tag}): ${err.message}`);
           }
         }
       }
-    } catch {
+    } catch (err: any) {
       out.skipped++;
+      if (out.skipped <= 5) {
+        console.error(`\n[harvest] battle parse error (tag=${tag}): ${err.message}`);
+      }
     }
   }
 
@@ -145,13 +173,11 @@ async function main() {
   const prisma = new PrismaClient();
   console.log("=== BrawlGG Leaderboard Harvester ===\n");
 
-  // Build brawler lookup
   const dbBrawlers = await prisma.brawler.findMany({ select: { id: true, name: true } });
   const brawlerIdByName: Record<string, string> = {};
   for (const b of dbBrawlers) brawlerIdByName[b.name.toLowerCase()] = b.id;
   console.log(`Loaded ${dbBrawlers.length} brawlers from DB\n`);
 
-  // Collect leaderboard tags
   const regions = ["global", "US", "GB", "KR", "BR"];
   const seenTags = new Set<string>();
   const leaderboardTags: string[] = [];
@@ -173,7 +199,6 @@ async function main() {
 
   console.log(`\nTotal leaderboard players: ${leaderboardTags.length}\n`);
 
-  // Process leaderboard
   let totalSaved = 0;
   let totalSkipped = 0;
   const chainPool = new Set<string>();
@@ -193,7 +218,6 @@ async function main() {
 
   console.log(`\n\nLeaderboard sweep done. Saved ${totalSaved} battles.\n`);
 
-  // Chain harvest — follow tags from those battles
   const chainTags = Array.from(chainPool).filter((t) => !seenTags.has(t)).slice(0, 400);
   console.log(`Chain harvesting ${chainTags.length} additional players...\n`);
 
