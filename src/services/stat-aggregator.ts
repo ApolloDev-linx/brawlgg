@@ -59,50 +59,49 @@ export async function aggregateStats(): Promise<AggregationResult> {
   result.totalBattles = battles.length;
   if (battles.length === 0) return result;
 
-  // Group: mapName → brawlerName → { wins, total }
-  const grouped = new Map<string, Map<string, { wins: number; total: number; brawlerId: string | null }>>();
+  // Group: mapName → brawlerName → { wins, total, brawlerId }
+  // Using plain objects instead of Map to avoid TS downlevelIteration issues
+  const grouped: Record<string, Record<string, { wins: number; total: number; brawlerId: string | null }>> = {};
 
   for (const b of battles) {
-    if (!grouped.has(b.mapName)) grouped.set(b.mapName, new Map());
-    const mapGroup = grouped.get(b.mapName)!;
-
-    if (!mapGroup.has(b.brawlerName)) {
-      mapGroup.set(b.brawlerName, { wins: 0, total: 0, brawlerId: b.brawlerId });
+    if (!grouped[b.mapName]) grouped[b.mapName] = {};
+    const mapGroup = grouped[b.mapName];
+    if (!mapGroup[b.brawlerName]) {
+      mapGroup[b.brawlerName] = { wins: 0, total: 0, brawlerId: b.brawlerId };
     }
-    const entry = mapGroup.get(b.brawlerName)!;
+    const entry = mapGroup[b.brawlerName];
     entry.total++;
     if (b.result === "victory") entry.wins++;
     if (!entry.brawlerId && b.brawlerId) entry.brawlerId = b.brawlerId;
   }
 
-  // Load our map records to match by name
   const dbMaps = await prisma.map.findMany({ select: { id: true, name: true } });
-  const mapIdByName = new Map<string, string>();
-  for (const m of dbMaps) mapIdByName.set(m.name.toLowerCase(), m.id);
+  const mapIdByName: Record<string, string> = {};
+  for (const m of dbMaps) mapIdByName[m.name.toLowerCase()] = m.id;
 
-  // Load brawler records for fallback name→id resolution
   const dbBrawlers = await prisma.brawler.findMany({ select: { id: true, name: true } });
-  const brawlerIdByName = new Map<string, string>();
-  for (const b of dbBrawlers) brawlerIdByName.set(b.name.toLowerCase(), b.id);
+  const brawlerIdByName: Record<string, string> = {};
+  for (const b of dbBrawlers) brawlerIdByName[b.name.toLowerCase()] = b.id;
 
   const processedMaps = new Set<string>();
 
-  for (const [mapName, brawlerMap] of grouped) {
-    const mapId = mapIdByName.get(mapName.toLowerCase());
-    if (!mapId) continue; // map not in our DB yet — skip
+  for (const mapName of Object.keys(grouped)) {
+    const mapId = mapIdByName[mapName.toLowerCase()];
+    if (!mapId) continue;
 
     processedMaps.add(mapName);
+    const brawlerMap = grouped[mapName];
 
-    // Compute total picks on this map to derive pick rates
-    const totalPicksOnMap = Array.from(brawlerMap.values()).reduce(
+    const totalPicksOnMap = Object.values(brawlerMap).reduce(
       (s, v) => s + v.total,
       0
     );
 
-    for (const [brawlerName, stats] of brawlerMap) {
+    for (const brawlerName of Object.keys(brawlerMap)) {
+      const stats = brawlerMap[brawlerName];
       const brawlerId =
-        stats.brawlerId ?? brawlerIdByName.get(brawlerName.toLowerCase()) ?? null;
-      if (!brawlerId) continue; // can't link to a known brawler
+        stats.brawlerId ?? brawlerIdByName[brawlerName.toLowerCase()] ?? null;
+      if (!brawlerId) continue;
 
       const winRate = stats.total > 0
         ? Math.round((stats.wins / stats.total) * 1000) / 10
@@ -112,8 +111,6 @@ export async function aggregateStats(): Promise<AggregationResult> {
         ? Math.round((stats.total / totalPicksOnMap) * 1000) / 10
         : 0;
 
-      // We don't have ban data from battle logs — keep existing ban rate if isReal already
-      // or leave at 0 until we have a real source
       const isReal = stats.total >= MIN_SAMPLE;
       const tier = getTier(winRate);
       const pickCategory = getPickCategory(winRate, pickRate, 0);
@@ -124,14 +121,12 @@ export async function aggregateStats(): Promise<AggregationResult> {
         });
 
         if (existing) {
-          // Only overwrite simulated stats OR update existing real stats
           if (!existing.isReal || isReal) {
             await prisma.mapBrawlerStat.update({
               where: { mapId_brawlerId: { mapId, brawlerId } },
               data: {
                 winRate,
                 pickRate,
-                // preserve existing banRate if we don't have real data for it
                 banRate: existing.isReal ? existing.banRate : 0,
                 tier,
                 pickCategory,
@@ -160,7 +155,7 @@ export async function aggregateStats(): Promise<AggregationResult> {
           result.brawlersUpdated++;
           if (isReal) result.realStatsCount++;
         }
-      } catch (err) {
+      } catch {
         // continue on individual failures
       }
     }
