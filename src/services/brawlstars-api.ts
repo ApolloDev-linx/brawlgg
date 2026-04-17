@@ -1,6 +1,6 @@
 import { normalizeTag } from "@/lib/utils";
 
-const BASE_URL = "https://api.brawlstars.com/v1";
+const BASE_URL = process.env.BRAWL_STARS_PROXY_URL || "https://api.brawlstars.com/v1";
 
 interface RateLimitState {
   remaining: number;
