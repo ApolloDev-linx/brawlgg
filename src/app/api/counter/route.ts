@@ -4,6 +4,9 @@ import { computeCounters } from "@/services/counter-engine";
 import { getTier } from "@/lib/constants";
 import type { BrawlerWithStats } from "@/types/brawler";
 
+export const dynamic = "force-dynamic";
+
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();

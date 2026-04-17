@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL } from "@/lib/constants";
 
+export const dynamic = "force-dynamic";
+
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode");

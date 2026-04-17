@@ -4,6 +4,9 @@ import { CACHE_TTL, TIER_COLORS, TYPE_COLORS, TYPE_LABELS } from "@/lib/constant
 import { getTier } from "@/lib/constants";
 import Link from "next/link";
 
+export const dynamic = "force-dynamic";
+
+
 interface BrawlerSummary {
   id: string;
   name: string;

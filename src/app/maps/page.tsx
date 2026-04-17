@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL } from "@/lib/constants";
 import { MapList } from "@/components/maps/MapList";
+export const dynamic = "force-dynamic";
+
 
 async function getMaps() {
   return cached("maps:all", CACHE_TTL.MAPS, async () => {

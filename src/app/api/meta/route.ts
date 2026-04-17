@@ -3,6 +3,8 @@ import { cached } from "@/lib/redis";
 import { CACHE_TTL } from "@/lib/constants";
 import { getMetaOverview } from "@/services/meta-engine";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const data = await cached("api:meta:overview", CACHE_TTL.META, async () => {

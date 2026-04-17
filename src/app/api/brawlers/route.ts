@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, getTier } from "@/lib/constants";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const data = await cached("api:brawlers", CACHE_TTL.BRAWLERS, async () => {
