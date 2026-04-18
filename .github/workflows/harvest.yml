@@ -28,6 +28,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BRAWL_STARS_API_KEY: ${{ secrets.BRAWL_STARS_API_KEY }}
+          BRAWL_STARS_PROXY_URL: ${{ secrets.BRAWL_STARS_PROXY_URL }}
+
         run: npx tsx scripts/harvest.ts
 
       - name: Run aggregator
