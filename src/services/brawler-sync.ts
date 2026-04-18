@@ -1,44 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { fetchBrawlers, type BrawlifyBrawler } from "./brawlify-api";
-import { SEED_BRAWLERS, COUNTER_MATRIX } from "@/lib/constants";
+import {
+  SEED_BRAWLERS,
+  COUNTER_MATRIX,
+  CLASS_TO_TYPE,
+  CLASS_TO_ROLE,
+  BRAWLER_TYPE_OVERRIDES,
+} from "@/lib/constants";
 import type { BrawlerType } from "@/types/brawler";
-
-const CLASS_TO_TYPE: Record<string, BrawlerType> = {
-  fighter: "lane",
-  "damage dealer": "lane",
-  skirmisher: "lane",
-  controller: "lane",
-  heavyweight: "tank",
-  assassin: "assassin",
-  sharpshooter: "sniper",
-  marksman: "sniper",
-  thrower: "thrower",
-  artillery: "thrower",
-  support: "lane",
-};
-
-const CLASS_TO_ROLE: Record<string, string> = {
-  fighter: "Damage",
-  "damage dealer": "Damage",
-  skirmisher: "Damage",
-  heavyweight: "Tank",
-  assassin: "Assassin",
-  sharpshooter: "Sniper",
-  marksman: "Sniper",
-  thrower: "Thrower",
-  artillery: "Thrower",
-  controller: "Control",
-  support: "Support",
-};
-
-const NAME_OVERRIDES: Record<string, { type?: BrawlerType; role?: string }> = {
-  Buzz: { type: "assassin", role: "Assassin" },
-  Fang: { type: "assassin", role: "Assassin" },
-  Sam: { type: "assassin", role: "Assassin" },
-  Maisie: { type: "sniper", role: "Sniper" },
-  Mandy: { type: "sniper", role: "Sniper" },
-  Angelo: { type: "sniper", role: "Sniper" },
-};
 
 interface NormalizedBrawler {
   name: string;
@@ -50,23 +19,72 @@ interface NormalizedBrawler {
 }
 
 /**
- * Normalize any casing from the API (e.g. "BULL", "el primo") to title case ("Bull", "El Primo").
+ * Normalize any casing/separators from the API to canonical title case.
+ * Handles: "BULL" -> "Bull", "el primo" -> "El Primo",
+ *          "EL-PRIMO" -> "El Primo", "LARRY-LAWRIE" -> "Larry & Lawrie",
+ *          "MR-P" -> "Mr. P"
  */
 function toTitleCase(str: string): string {
-  return str
-    .toLowerCase()
+  // Explicit canonicalizations for brawlers the API serves with weird slugs.
+  // These take priority over the generic hyphen/underscore handling below.
+  const CANONICAL: Record<string, string> = {
+    "larry-lawrie": "Larry & Lawrie",
+    "larry and lawrie": "Larry & Lawrie",
+    "mr-p": "Mr. P",
+    "mr p": "Mr. P",
+    "el-primo": "El Primo",
+    // Keep legitimate hyphens:
+    "8-bit": "8-Bit",
+    "r-t": "R-T",
+    "jae-yong": "Jae-Yong",
+  };
+
+  const lower = str.toLowerCase().trim();
+  if (CANONICAL[lower]) return CANONICAL[lower];
+
+  // Default path: convert hyphens/underscores to spaces, then title-case.
+  return lower
+    .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
+  const name = toTitleCase(raw.name);
   const className = (raw.class?.name || "").toLowerCase();
-  const name = toTitleCase(raw.name); // always normalize to title case
-  const override = NAME_OVERRIDES[name];
+
+  // 1. Authoritative: hand-curated overrides win, always.
+  const override = BRAWLER_TYPE_OVERRIDES[name];
+  if (override) {
+    return {
+      name,
+      role: override.role,
+      type: override.type,
+      hp: estimateHp(className, name),
+      iconUrl: raw.imageUrl2 || raw.imageUrl || null,
+      externalId: raw.id,
+    };
+  }
+
+  // 2. Unknown brawler (probably a new release) — fall back to API class
+  //    mapping, but LOUDLY log so we know to add them to BRAWLER_TYPE_OVERRIDES.
+  const mappedType = CLASS_TO_TYPE[className];
+  const mappedRole = CLASS_TO_ROLE[className];
+
+  if (!mappedType) {
+    console.warn(
+      `[brawler-sync] UNCLASSIFIED: "${name}" (API class="${raw.class?.name}"). ` +
+        `Add to BRAWLER_TYPE_OVERRIDES in constants.ts. Defaulting to lane/Damage.`
+    );
+  } else {
+    console.info(
+      `[brawler-sync] New brawler "${name}" auto-classified as ${mappedRole}/${mappedType} from API class "${raw.class?.name}". Verify and add to BRAWLER_TYPE_OVERRIDES.`
+    );
+  }
 
   return {
     name,
-    role: override?.role || CLASS_TO_ROLE[className] || "Damage",
-    type: override?.type || CLASS_TO_TYPE[className] || "lane",
+    role: mappedRole || "Damage",
+    type: mappedType || "lane",
     hp: estimateHp(className, name),
     iconUrl: raw.imageUrl2 || raw.imageUrl || null,
     externalId: raw.id,
@@ -82,7 +100,7 @@ function estimateHp(className: string, name: string): number {
   };
   if (known[name]) return known[name];
   switch (className) {
-    case "heavyweight": return 7000;
+    case "heavyweight": case "tank": return 7000;
     case "assassin": return 4200;
     case "sharpshooter": case "marksman": return 3640;
     case "thrower": case "artillery": return 3360;
@@ -111,157 +129,58 @@ export async function syncBrawlerData(
     errors: [],
   };
 
-  let normalized: NormalizedBrawler[];
-
+  let rawBrawlers: BrawlifyBrawler[] = [];
   try {
-    console.log("[brawler-sync] Fetching from Brawlify API...");
-    const raw = await fetchBrawlers();
-    if (!raw || raw.length === 0) {
-      throw new Error("API returned empty brawler list");
-    }
-    const released = raw.filter((b) => b.released !== false);
-    console.log(
-      `[brawler-sync] API returned ${raw.length} brawlers (${released.length} released)`
-    );
-    normalized = released.map(normalizeBrawler);
-    result.source = "api";
-  } catch (err: any) {
-    console.warn(
-      `[brawler-sync] API failed (${err.message}), using fallback seed data`
-    );
-    result.errors.push(`API fetch failed: ${err.message}`);
-    normalized = SEED_BRAWLERS.map((b) => ({
-      name: b.name, // SEED_BRAWLERS are already title-cased
-      role: b.role,
-      type: b.type as BrawlerType,
-      hp: b.hp,
-      iconUrl: null,
-      externalId: 0,
-    }));
+    rawBrawlers = await fetchBrawlers();
+    if (rawBrawlers.length === 0) throw new Error("Empty brawler list from API");
+  } catch (e) {
     result.source = "fallback";
+    result.errors.push(`API fetch failed: ${(e as Error).message}`);
+    // Fall back to seed list
+    rawBrawlers = SEED_BRAWLERS.map((b, i) => ({
+      id: 16000000 + i,
+      name: b.name,
+      class: { id: 0, name: b.role },
+      imageUrl: "",
+      imageUrl2: "",
+    })) as BrawlifyBrawler[];
   }
 
+  const normalized = rawBrawlers.map(normalizeBrawler);
   result.total = normalized.length;
 
-  for (const brawler of normalized) {
+  for (const b of normalized) {
     try {
-      // Use a true upsert — no more find+create race condition
-      const existing = await prisma.brawler.findFirst({
-        where: { name: { equals: brawler.name, mode: "insensitive" } },
-      });
-
+      const existing = await prisma.brawler.findUnique({ where: { name: b.name } });
       if (existing) {
         await prisma.brawler.update({
           where: { id: existing.id },
           data: {
-            name: brawler.name, // normalize the name in DB too
-            role: brawler.role,
-            type: brawler.type,
-            hp: brawler.hp,
-            iconUrl: brawler.iconUrl || existing.iconUrl,
+            role: b.role,
+            type: b.type,
+            hp: b.hp,
+            iconUrl: b.iconUrl,
+            externalId: b.externalId,
           },
         });
         result.updated++;
       } else {
         await prisma.brawler.create({
           data: {
-            name: brawler.name,
-            role: brawler.role,
-            type: brawler.type,
-            hp: brawler.hp,
-            iconUrl: brawler.iconUrl,
+            name: b.name,
+            role: b.role,
+            type: b.type,
+            hp: b.hp,
+            iconUrl: b.iconUrl,
+            externalId: b.externalId,
           },
         });
         result.created++;
       }
-    } catch (err: any) {
-      result.errors.push(`Failed to upsert ${brawler.name}: ${err.message}`);
+    } catch (e) {
+      result.errors.push(`${b.name}: ${(e as Error).message}`);
     }
   }
 
   return result;
-}
-
-export async function syncCounterMatchups(
-  prisma: PrismaClient
-): Promise<{ total: number; errors: string[] }> {
-  const brawlers = await prisma.brawler.findMany();
-  let total = 0;
-  const errors: string[] = [];
-
-  for (const brawler of brawlers) {
-    const info = COUNTER_MATRIX[brawler.type as BrawlerType];
-    if (!info) continue;
-    for (const other of brawlers) {
-      if (brawler.id === other.id) continue;
-      let score = 0;
-      let reason = "Neutral matchup, depends on skill and positioning";
-      if (info.strongVs.includes(other.type as BrawlerType)) {
-        score = 1.5 + Math.random();
-        reason = `${brawler.name} (${brawler.type}) counters ${other.name} (${other.type})`;
-      } else if (info.weakVs.includes(other.type as BrawlerType)) {
-        score = -(1.5 + Math.random());
-        reason = `${brawler.name} (${brawler.type}) is weak against ${other.name} (${other.type})`;
-      } else {
-        score = -0.5 + Math.random();
-      }
-      try {
-        await prisma.counterMatchup.upsert({
-          where: {
-            brawlerId_counterId: { brawlerId: brawler.id, counterId: other.id },
-          },
-          update: { advantageScore: Math.round(score * 10) / 10, reason },
-          create: {
-            brawlerId: brawler.id,
-            counterId: other.id,
-            advantageScore: Math.round(score * 10) / 10,
-            reason,
-          },
-        });
-        total++;
-      } catch (err: any) {
-        errors.push(`Matchup ${brawler.name} vs ${other.name}: ${err.message}`);
-      }
-    }
-  }
-
-  return { total, errors };
-}
-
-export async function syncMapBrawlerStats(
-  prisma: PrismaClient
-): Promise<number> {
-  const brawlers = await prisma.brawler.findMany();
-  const maps = await prisma.map.findMany();
-  let count = 0;
-
-  for (const map of maps) {
-    for (const brawler of brawlers) {
-      const baseWin = 45 + Math.random() * 15;
-      const winRate = Math.round(baseWin * 10) / 10;
-      const pickRate = Math.round((2 + Math.random() * 10) * 10) / 10;
-      const banRate = Math.round(Math.random() * 8 * 10) / 10;
-      let tier: string;
-      if (winRate >= 54) tier = "S";
-      else if (winRate >= 51) tier = "A";
-      else if (winRate >= 48) tier = "B";
-      else tier = "C";
-      let pickCategory: string | null = null;
-      if (winRate >= 54 && pickRate >= 8) pickCategory = "first_pick";
-      else if (winRate >= 51 && banRate < 3) pickCategory = "safe";
-      else if (winRate >= 53 && banRate >= 5) pickCategory = "high_risk";
-
-      await prisma.mapBrawlerStat.upsert({
-        where: { mapId_brawlerId: { mapId: map.id, brawlerId: brawler.id } },
-        update: { winRate, pickRate, banRate, tier, pickCategory },
-        create: {
-          mapId: map.id, brawlerId: brawler.id,
-          winRate, pickRate, banRate, tier, pickCategory,
-        },
-      });
-      count++;
-    }
-  }
-
-  return count;
 }

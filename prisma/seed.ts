@@ -4,35 +4,15 @@ import {
   SEED_MODES,
   SEED_MAPS,
   COUNTER_MATRIX,
+  CLASS_TO_TYPE,
+  CLASS_TO_ROLE,
+  BRAWLER_TYPE_OVERRIDES,
 } from "../src/lib/constants";
 import type { BrawlerType } from "../src/types/brawler";
 
 const prisma = new PrismaClient();
 const BRAWLIFY_URL = "https://api.brawlapi.com/v1/brawlers";
 
-const CLASS_TO_TYPE: Record<string, string> = {
-  fighter: "lane", "damage dealer": "lane", skirmisher: "lane",
-  controller: "lane", heavyweight: "tank", assassin: "assassin",
-  sharpshooter: "sniper", marksman: "sniper",
-  thrower: "thrower", artillery: "thrower", support: "lane",
-};
-
-const CLASS_TO_ROLE: Record<string, string> = {
-  fighter: "Damage", "damage dealer": "Damage", skirmisher: "Damage",
-  heavyweight: "Tank", assassin: "Assassin",
-  sharpshooter: "Sniper", marksman: "Sniper",
-  thrower: "Thrower", artillery: "Thrower",
-  controller: "Control", support: "Support",
-};
-
-const NAME_OVERRIDES: Record<string, { type?: string; role?: string }> = {
-  Buzz: { type: "assassin", role: "Assassin" },
-  Fang: { type: "assassin", role: "Assassin" },
-  Sam: { type: "assassin", role: "Assassin" },
-  Maisie: { type: "sniper", role: "Sniper" },
-  Mandy: { type: "sniper", role: "Sniper" },
-  Angelo: { type: "sniper", role: "Sniper" },
-};
 
 function estimateHp(className: string): number {
   switch (className) {
@@ -78,7 +58,7 @@ async function fetchBrawlerData(forceLocal: boolean): Promise<{
     );
     const brawlers: BrawlerInput[] = released.map((raw: any) => {
       const className = (raw.class?.name || "").toLowerCase();
-      const override = NAME_OVERRIDES[raw.name];
+      const override = BRAWLER_TYPE_OVERRIDES[raw.name];
       const seedMatch = SEED_BRAWLERS.find((s) => s.name === raw.name);
       return {
         name: raw.name,

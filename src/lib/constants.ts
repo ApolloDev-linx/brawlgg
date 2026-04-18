@@ -261,3 +261,174 @@ export const CACHE_TTL = {
   META: 1800, // 30 min
   TRENDS: 3600, // 1 hr
 };
+
+// =============================================================================
+// BRAWLER CLASSIFICATION — Authoritative Source of Truth
+// =============================================================================
+// These constants replace the duplicated maps in brawler-sync.ts and seed.ts.
+// BRAWLER_TYPE_OVERRIDES is the authoritative mapping — when the harvest runs,
+// role/type come from HERE, not from the Brawlify API class field. The API
+// class field is only used as a LAST RESORT for brawlers not yet in this list.
+// =============================================================================
+
+// Fallback class mapping (used only when a brawler is NOT in BRAWLER_TYPE_OVERRIDES)
+// Includes both current Supercell class names and legacy names for safety.
+export const CLASS_TO_TYPE: Record<string, BrawlerType> = {
+  // current names
+  "damage dealer": "lane",
+  "tank": "tank",            // <-- CRITICAL: Supercell renamed Heavyweight -> Tank
+  "marksman": "sniper",
+  "artillery": "thrower",
+  "controller": "lane",
+  "assassin": "assassin",
+  "support": "lane",
+  // legacy names (kept for backwards compat)
+  "heavyweight": "tank",
+  "sharpshooter": "sniper",
+  "thrower": "thrower",
+  "fighter": "lane",
+  "skirmisher": "lane",
+};
+
+export const CLASS_TO_ROLE: Record<string, string> = {
+  "damage dealer": "Damage",
+  "tank": "Tank",
+  "marksman": "Sniper",
+  "artillery": "Thrower",
+  "controller": "Control",
+  "assassin": "Assassin",
+  "support": "Support",
+  "heavyweight": "Tank",
+  "sharpshooter": "Sniper",
+  "thrower": "Thrower",
+  "fighter": "Damage",
+  "skirmisher": "Damage",
+};
+
+// AUTHORITATIVE role/type per brawler.
+// Keys MUST match the normalized title-case name the sync produces.
+// For hybrids, we pick the PRIMARY type and note the secondary in a comment.
+// To add a new brawler: add a line here. To correct a classification: edit here.
+export const BRAWLER_TYPE_OVERRIDES: Record <
+  string,
+  { role: string; type: BrawlerType; hybrid?: string }
+> = {
+  // --- Starters / Trophy Road ---
+  "Shelly":   { role: "Damage",   type: "lane" },
+  "Nita":     { role: "Damage",   type: "lane" },
+  "Colt":     { role: "Sniper",   type: "sniper" },
+  "Bull":     { role: "Tank",     type: "tank" },
+  "Brock":    { role: "Sniper",   type: "sniper" },
+  "El Primo": { role: "Tank",     type: "tank" },
+  "Barley":   { role: "Thrower",  type: "thrower" },
+  "Poco":     { role: "Support",  type: "lane" },
+  "Rosa":     { role: "Tank",     type: "tank" },
+  "Jessie":   { role: "Damage",   type: "lane" },
+  "Dynamike": { role: "Thrower",  type: "thrower" },
+  "Tick":     { role: "Thrower",  type: "thrower" },
+  "8-Bit":    { role: "Damage",   type: "lane" },
+  "Emz":      { role: "Control",  type: "lane" },
+  "Stu":      { role: "Assassin", type: "assassin" },
+  "Rico":     { role: "Damage",   type: "lane" },
+  "Darryl":   { role: "Tank",     type: "tank",     hybrid: "tank + assassin" },
+
+  // --- Rare / Super Rare ---
+  "Penny":    { role: "Control",  type: "lane" },
+  "Carl":     { role: "Damage",   type: "lane" },
+  "Jacky":    { role: "Tank",     type: "tank" },
+  "Gus":      { role: "Support",  type: "lane" },
+
+  // --- Epics ---
+  "Bo":       { role: "Control",  type: "lane" },
+  "Piper":    { role: "Sniper",   type: "sniper" },
+  "Pam":      { role: "Support",  type: "lane" },
+  "Frank":    { role: "Tank",     type: "tank" },
+  "Bibi":     { role: "Tank",     type: "tank" },
+  "Bea":      { role: "Sniper",   type: "sniper" },
+  "Nani":     { role: "Sniper",   type: "sniper" },
+  "Edgar":    { role: "Assassin", type: "assassin" },
+  "Griff":    { role: "Damage",   type: "lane" },
+  "Grom":     { role: "Thrower",  type: "thrower" },
+  "Bonnie":   { role: "Damage",   type: "lane",     hybrid: "damage + marksman (2nd form)" },
+  "Hank":     { role: "Tank",     type: "tank" },
+
+  // --- Mythics ---
+  "Mortis":         { role: "Assassin", type: "assassin" },
+  "Tara":           { role: "Damage",   type: "lane" },
+  "Gene":           { role: "Support",  type: "lane" },
+  "Max":            { role: "Support",  type: "lane" },
+  "Mr. P":          { role: "Control",  type: "lane" },
+  "Sprout":         { role: "Thrower",  type: "thrower" },
+  "Byron":          { role: "Support",  type: "lane" },
+  "Squeak":         { role: "Control",  type: "lane" },
+  "Gray":           { role: "Support",  type: "lane" },
+  "Willow":         { role: "Thrower",  type: "thrower" },
+  "Doug":           { role: "Tank",  type: "tank", hybrid: "support + tank" },
+  "Otis":           { role: "Control",  type: "lane" },
+  "Sam":            { role: "Assassin", type: "assassin" },
+  "Buster":         { role: "Tank",     type: "tank" },
+  "Mandy":          { role: "Sniper",   type: "sniper" },
+  "R-T":            { role: "Damage",   type: "lane" },
+  "Maisie":         { role: "Sniper",   type: "sniper" },
+  "Cordelius":      { role: "Assassin", type: "assassin" },
+  "Pearl":          { role: "Damage",   type: "lane" },
+  "Charlie":        { role: "Control",  type: "lane" },
+  "Mico":           { role: "Assassin", type: "assassin" },
+  "Kit":            { role: "Support",  type: "lane",     hybrid: "support + assassin" },
+  "Melodie":        { role: "Assassin", type: "assassin" },
+  "Lily":           { role: "Assassin", type: "assassin" },
+  "Angelo":         { role: "Sniper",   type: "sniper" },
+  "Draco":          { role: "Tank",     type: "tank" },
+  "Berry":          { role: "Support",  type: "lane" },
+  "Clancy":         { role: "Damage",   type: "lane" },
+  "Moe":            { role: "Damage",   type: "lane" },
+  "Kenji":          { role: "Assassin", type: "assassin" },
+  "Larry & Lawrie": { role: "Damage",   type: "lane" },
+  "Juju":           { role: "Thrower",  type: "thrower" },
+  "Meeple":         { role: "Control",  type: "lane" },
+  "Ollie":          { role: "Tank",     type: "tank" },
+  "Finx":           { role: "Control",  type: "lane" },
+  "Shade":          { role: "Assassin", type: "assassin" },
+  "Lumi":           { role: "Damage",   type: "lane" },
+  "Ziggy":          { role: "Control",  type: "lane" },
+  "Jae-Yong":       { role: "Support",  type: "lane" },
+  "Chuck":          { role: "Damage",   type: "lane" },
+
+  // --- Legendaries ---
+  "Spike":     { role: "Damage",   type: "lane" },
+  "Crow":      { role: "Assassin", type: "assassin" },
+  "Leon":      { role: "Assassin", type: "assassin" },
+  "Sandy":     { role: "Support",  type: "lane" },
+  "Amber":     { role: "Damage",   type: "lane" },
+  "Meg":       { role: "Tank",   type: "tank" },
+  "Chester":   { role: "Damage",   type: "lane" },
+  "Gale":      { role: "Damage",   type: "lane",     hybrid: "damage + support" },
+  "Surge":     { role: "Damage",   type: "lane" },
+  "Colette":   { role: "Damage",   type: "lane" },
+  "Lou":       { role: "Control",  type: "lane",     hybrid: "damage + assassin + support" },
+  "Ruffs":     { role: "Support",  type: "lane" },
+  "Belle":     { role: "Sniper",   type: "sniper" },
+  "Buzz":      { role: "Assassin", type: "assassin" },
+  "Ash":       { role: "Tank",     type: "tank" },
+  "Lola":      { role: "Damage",   type: "lane" },
+  "Fang":      { role: "Assassin", type: "assassin" },
+  "Eve":       { role: "Control",  type: "lane" },
+  "Janet":     { role: "Damage",   type: "lane" },
+
+  // --- Ultra Legendaries ---
+  "Kaze":      { role: "Assassin", type: "assassin" },
+  "Sirius":     { role: "Control",  type: "lane" },
+
+
+// --- New brawlers (post-cutoff) ---
+  "Alli":          { role: "Assassin", type: "assassin" },
+  "Mina":          { role: "Damage",   type: "lane" },
+  "Gigi":          { role: "Assassin", type: "assassin" },
+  "Glowbert":      { role: "Support",  type: "lane" },
+  "Glowy":         { role: "Support",  type: "lane" },
+  "Pierce":        { role: "Sniper",   type: "sniper" },
+  "Trunk":         { role: "Tank",     type: "tank" },
+  "Najia":         { role: "Damage",   type: "lane" },
+
+
+};
