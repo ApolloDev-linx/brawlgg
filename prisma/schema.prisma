@@ -9,14 +9,15 @@ datasource db {
 }
 
 model Brawler {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  role      String
-  type      String
-  hp        Int
-  iconUrl   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  name       String   @unique
+  role       String
+  type       String
+  hp         Int
+  iconUrl    String?
+  externalId Int?     @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   mapStats       MapBrawlerStat[]
   counterAs      CounterMatchup[] @relation("BrawlerCounters")
