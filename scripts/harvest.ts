@@ -16,6 +16,7 @@ config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
 const BASE_URL = process.env.BRAWL_STARS_PROXY_URL || "https://api.brawlstars.com/v1";
+console.log("[debug] BASE_URL:", BASE_URL);
 
 async function apiFetch<T>(path: string): Promise<T> {
   const apiKey = process.env.BRAWL_STARS_API_KEY;
