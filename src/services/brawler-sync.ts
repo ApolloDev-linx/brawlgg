@@ -184,3 +184,140 @@ export async function syncBrawlerData(
 
   return result;
 }
+
+import { getTier } from "@/lib/constants";
+
+// Counter matchups
+// ---------------------------------------------------------------------------
+
+export interface MatchupSyncResult {
+  total: number;
+  errors: string[];
+}
+
+function stableRand(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+function computeMatchupScore(
+  attackerName: string,
+  attackerType: BrawlerType,
+  defenderName: string,
+  defenderType: BrawlerType
+): { score: number; reason: string } {
+  const info = COUNTER_MATRIX[attackerType];
+  const rand = stableRand(`${attackerName}|${defenderName}`);
+
+  if (info?.strongVs.includes(defenderType)) {
+    return {
+      score: Math.round((1.5 + rand) * 10) / 10,
+      reason: `${attackerName} (${attackerType}) counters ${defenderName} (${defenderType})`,
+    };
+  }
+  if (info?.weakVs.includes(defenderType)) {
+    return {
+      score: Math.round(-(1.5 + rand) * 10) / 10,
+      reason: `${attackerName} (${attackerType}) is weak against ${defenderName} (${defenderType})`,
+    };
+  }
+  return {
+    score: Math.round((-0.5 + rand) * 10) / 10,
+    reason: "Neutral matchup, depends on skill and positioning",
+  };
+}
+
+export async function syncCounterMatchups(
+  prisma: PrismaClient
+): Promise<MatchupSyncResult> {
+  const result: MatchupSyncResult = { total: 0, errors: [] };
+  const brawlers = await prisma.brawler.findMany();
+
+  for (const attacker of brawlers) {
+    for (const defender of brawlers) {
+      if (attacker.id === defender.id) continue;
+      const { score, reason } = computeMatchupScore(
+        attacker.name,
+        attacker.type as BrawlerType,
+        defender.name,
+        defender.type as BrawlerType
+      );
+      try {
+        await prisma.counterMatchup.upsert({
+          where: {
+            brawlerId_counterId: {
+              brawlerId: attacker.id,
+              counterId: defender.id,
+            },
+          },
+          update: { advantageScore: score, reason },
+          create: {
+            brawlerId: attacker.id,
+            counterId: defender.id,
+            advantageScore: score,
+            reason,
+          },
+        });
+        result.total++;
+      } catch (e) {
+        result.errors.push(
+          `${attacker.name} vs ${defender.name}: ${(e as Error).message}`
+        );
+      }
+    }
+  }
+  return result;
+}
+
+
+// Map brawler stats (placeholder rows for brawlers missing one on each map;
+// real rates get filled in later by stat-aggregator.)
+// ---------------------------------------------------------------------------
+
+export async function syncMapBrawlerStats(
+  prisma: PrismaClient
+): Promise<number> {
+  const [brawlers, maps] = await Promise.all([
+    prisma.brawler.findMany(),
+    prisma.map.findMany({ where: { active: true } }),
+  ]);
+
+  let created = 0;
+  for (const map of maps) {
+    for (const brawler of brawlers) {
+      const existing = await prisma.mapBrawlerStat.findUnique({
+        where: {
+          mapId_brawlerId: { mapId: map.id, brawlerId: brawler.id },
+        },
+      });
+      if (existing) continue; // don't clobber real aggregated data
+
+      const rand = stableRand(`${map.id}|${brawler.id}`);
+      const winRate = 45 + rand * 10;
+      const pickRate = rand * 15;
+      const banRate = rand * 5;
+
+      try {
+        await prisma.mapBrawlerStat.create({
+          data: {
+            mapId: map.id,
+            brawlerId: brawler.id,
+            winRate,
+            pickRate,
+            banRate,
+            tier: getTier(winRate),
+            isReal: false,
+          },
+        });
+        created++;
+      } catch {
+        // skip dupes / race conditions silently
+      }
+    }
+  }
+  return created;
+}
