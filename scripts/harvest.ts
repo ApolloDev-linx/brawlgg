@@ -8,10 +8,19 @@
  *
  * Make sure your .env has BRAWL_STARS_API_KEY and DATABASE_URL set.
  * Typically takes 5-15 minutes depending on API rate limits.
+ *
+ * Tracked modes (product decision, competitive-focused):
+ *   Classic 3v3 ranked: Gem Grab, Brawl Ball, Bounty, Heist, Hot Zone,
+ *                       Knockout, Siege
+ *   Also included:      Wipeout (3v3, Knockout-like), Duels (1v1 skill)
+ *
+ * Excluded (novelty / non-ranked-relevant):
+ *   Basket Brawl, Volley Brawl, Payload, Brawl Hockey, Brawl Arena,
+ *   all 2v2/5v5 variants, Showdown (solo/duo), PvE modes
  */
+
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
-
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
@@ -35,13 +44,8 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Brawl Stars returns battleTime as "20230415T123456.000Z" — no dashes or colons.
- * new Date() can't parse that, so we normalise it to a proper ISO string first.
- */
 function parseBattleTime(raw: string): Date | null {
   if (!raw) return null;
-  // Match: 20230415T123456.000Z  or  20230415T123456Z
   const m = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\.\d+)?Z?$/);
   if (!m) return null;
   const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ?? ""}Z`;
@@ -49,9 +53,17 @@ function parseBattleTime(raw: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Competitive modes we care about (camelCase, matches Brawl Stars API battle.mode)
 const COMPETITIVE_MODES = new Set([
-  "gemGrab", "brawlBall", "bounty", "heist", "hotZone", "knockout", "siege",
-  "duels", "wipeout", "payload", "basketBrawl", "volleyBrawl",
+  "gemGrab",
+  "brawlBall",
+  "bounty",
+  "heist",
+  "hotZone",
+  "knockout",
+  "siege",
+  "wipeout",
+  "duels",
 ]);
 
 async function fetchLeaderboard(countryCode = "global"): Promise<string[]> {
@@ -73,35 +85,27 @@ async function processPlayer(
   brawlerIdByName: Record<string, string>
 ): Promise<{ saved: number; skipped: number; chainTags: string[] }> {
   const out = { saved: 0, skipped: 0, chainTags: [] as string[] };
-
   let items: any[];
   try {
     items = await fetchBattleLog(tag);
   } catch {
     return out;
   }
-
   for (const item of items) {
     try {
       const battle = item.battle;
       const event = item.event;
-
       if (!event?.map || !battle?.mode) { out.skipped++; continue; }
       if (!COMPETITIVE_MODES.has(battle.mode)) { out.skipped++; continue; }
       if (battle.type === "friendly" || battle.type === "practice") { out.skipped++; continue; }
-
       const battleResult: string = battle.result;
       if (!battleResult) { out.skipped++; continue; }
-
-      // Parse the non-standard BS timestamp — skip if unparseable
       const battleTime = parseBattleTime(item.battleTime);
       if (!battleTime) { out.skipped++; continue; }
-
       const mapName: string = event.map;
       const gameMode: string = battle.mode;
       const starPlayerTag: string | undefined = battle.starPlayer?.tag;
 
-      // ranked uses battle.players (flat), normal uses battle.teams (nested)
       const teams: any[][] = battle.teams || [];
       const allPlayers: any[] = battle.players
         ? battle.players
@@ -109,14 +113,12 @@ async function processPlayer(
 
       for (const player of allPlayers) {
         if (!player?.brawler?.name || !player?.tag) continue;
-
         const cleanTag = (player.tag as string).replace(/^#/, "");
         if (cleanTag !== tag) out.chainTags.push(cleanTag);
 
         const brawlerName = (player.brawler.name as string)
           .toLowerCase()
           .replace(/\b\w/g, (c: string) => c.toUpperCase());
-
         const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
         const isStarPlayer = player.tag === starPlayerTag;
 
@@ -166,7 +168,6 @@ async function processPlayer(
       }
     }
   }
-
   return out;
 }
 
@@ -182,7 +183,6 @@ async function main() {
   const regions = ["global", "US", "GB", "KR", "BR"];
   const seenTags = new Set<string>();
   const leaderboardTags: string[] = [];
-
   for (const region of regions) {
     try {
       process.stdout.write(`Fetching ${region} leaderboard... `);
@@ -197,44 +197,37 @@ async function main() {
       console.log(`failed (${err.message})`);
     }
   }
-
   console.log(`\nTotal leaderboard players: ${leaderboardTags.length}\n`);
 
   let totalSaved = 0;
   let totalSkipped = 0;
   const chainPool = new Set<string>();
-
   for (let i = 0; i < leaderboardTags.length; i++) {
     const tag = leaderboardTags[i];
     const { saved, skipped, chainTags } = await processPlayer(prisma, tag, brawlerIdByName);
     totalSaved += saved;
     totalSkipped += skipped;
     for (const ct of chainTags) { if (!seenTags.has(ct)) chainPool.add(ct); }
-
     process.stdout.write(
       `\r[Leaderboard] ${i + 1}/${leaderboardTags.length} players | Saved: ${totalSaved} battles`
     );
     await sleep(200);
   }
-
   console.log(`\n\nLeaderboard sweep done. Saved ${totalSaved} battles.\n`);
 
   const chainTags = Array.from(chainPool).filter((t) => !seenTags.has(t)).slice(0, 400);
   console.log(`Chain harvesting ${chainTags.length} additional players...\n`);
-
   for (let i = 0; i < chainTags.length; i++) {
     const tag = chainTags[i];
     seenTags.add(tag);
     const { saved, skipped } = await processPlayer(prisma, tag, brawlerIdByName);
     totalSaved += saved;
     totalSkipped += skipped;
-
     process.stdout.write(
       `\r[Chain] ${i + 1}/${chainTags.length} players | Total saved: ${totalSaved} battles`
     );
     await sleep(200);
   }
-
   console.log(`\n\nChain harvest done.\n`);
   console.log(`=== Harvest Summary ===`);
   console.log(`  Total battles saved: ${totalSaved}`);

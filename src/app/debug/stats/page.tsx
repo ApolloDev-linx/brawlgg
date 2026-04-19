@@ -3,18 +3,14 @@
  *
  * Self-consistency check. For every brawler, shows three independent numbers:
  *
- *   1. RAW        — computed fresh from BattleRecord (the source of truth)
+ *   1. RAW        — computed fresh from BattleRecord (filtered to tracked modes)
  *   2. AGGREGATED — sum of MapBrawlerStat rows weighted by sampleSize
  *   3. HOMEPAGE   — what aggregateBrawlerStats() returns (what users see)
  *
- * Statuses:
- *   ok              — raw and aggregated agree, sample sizes align
- *   partial-gap     — aggregator is missing >5% of raw battles (map mismatch)
- *   ingestion-gap   — aggregator saw zero battles despite raw data existing
- *   raw-agg-mismatch— samples align but winrates disagree by >0.5pp (real bug)
- *   no-data         — nothing ingested yet
- *
- * For dev only. Gate or delete in prod.
+ * This is a verification tool for devs. The page is honest about what
+ * gets counted vs intentionally excluded (5v5 events, retired modes)
+ * vs genuinely missing (long-tail maps). Not scary red warnings — just
+ * facts so you can spot regressions.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -22,6 +18,19 @@ import { aggregateBrawlerStats } from "@/lib/stats-utils";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+
+// Must match TRACKED_MODES in stat-aggregator.ts
+const TRACKED_MODES = [
+  "gemGrab",
+  "brawlBall",
+  "bounty",
+  "heist",
+  "hotZone",
+  "knockout",
+  "siege",
+  "wipeout",
+  "duels",
+];
 
 interface Row {
   name: string;
@@ -41,15 +50,17 @@ interface Row {
 }
 
 async function getVerificationData() {
-  // 1. RAW — count battles and wins directly from BattleRecord
+  // Raw counts from BattleRecord, filtered to tracked modes so we're
+  // comparing apples to apples with the aggregator
   const rawBattles = await prisma.battleRecord.groupBy({
     by: ["brawlerName"],
     _count: { _all: true },
+    where: { gameMode: { in: TRACKED_MODES } },
   });
 
   const rawWins = await prisma.battleRecord.groupBy({
     by: ["brawlerName"],
-    where: { result: "victory" },
+    where: { result: "victory", gameMode: { in: TRACKED_MODES } },
     _count: { _all: true },
   });
 
@@ -62,7 +73,6 @@ async function getVerificationData() {
     if (existing) existing.wins = r._count._all;
   }
 
-  // 2. AGGREGATED — pull every brawler with its per-map stats
   const brawlers = await prisma.brawler.findMany({
     include: { mapStats: true },
     orderBy: { name: "asc" },
@@ -94,7 +104,6 @@ async function getVerificationData() {
     } else if (rawBattlesCount > 0 && agg.sampleSize === 0) {
       status = "ingestion-gap";
     } else if (dropPercent > 5) {
-      // Aggregator is missing more than 5% of raw battles — map name mismatch
       status = "partial-gap";
       if (rawWinRate !== null) {
         delta = Math.round((agg.winRate - rawWinRate) * 10) / 10;
@@ -121,12 +130,24 @@ async function getVerificationData() {
 
   rows.sort((a, b) => b.rawBattles - a.rawBattles);
 
-  // Top-of-page summary
+  // Top-level stats
   const totalBattles = await prisma.battleRecord.count();
+  const trackedBattles = await prisma.battleRecord.count({
+    where: { gameMode: { in: TRACKED_MODES } },
+  });
+  const excludedByMode = totalBattles - trackedBattles;
+
+  const totalAggregatedSamples = rows.reduce(
+    (s, r) => s + r.aggregatedSampleSize,
+    0
+  );
+  const excludedByMap = trackedBattles - totalAggregatedSamples;
+
   const realStatRows = await prisma.mapBrawlerStat.count({
     where: { isReal: true },
   });
   const totalStatRows = await prisma.mapBrawlerStat.count();
+
   const latestAgg = await prisma.mapBrawlerStat.findFirst({
     orderBy: { computedAt: "desc" },
     select: { computedAt: true },
@@ -139,22 +160,18 @@ async function getVerificationData() {
   const partialGapRows = rows.filter((r) => r.status === "partial-gap").length;
   const gapRows = rows.filter((r) => r.status === "ingestion-gap").length;
 
-  // Aggregate ingestion loss across all brawlers
-  const totalAggregatedSamples = rows.reduce(
-    (s, r) => s + r.aggregatedSampleSize,
-    0
-  );
-  const totalDropped = totalBattles - totalAggregatedSamples;
-  const overallDropPercent =
-    totalBattles > 0 ? (totalDropped / totalBattles) * 100 : 0;
+  const countedPercent =
+    totalBattles > 0 ? (totalAggregatedSamples / totalBattles) * 100 : 0;
 
   return {
     rows,
     totals: {
       totalBattles,
+      trackedBattles,
+      excludedByMode,
+      excludedByMap,
       totalAggregatedSamples,
-      totalDropped,
-      overallDropPercent: Math.round(overallDropPercent * 10) / 10,
+      countedPercent: Math.round(countedPercent * 10) / 10,
       totalBrawlers: brawlers.length,
       realStatRows,
       totalStatRows,
@@ -180,11 +197,7 @@ function statusBadge(status: Row["status"], delta: number | null, drop: number) 
     );
   }
   if (status === "partial-gap") {
-    return (
-      <span style={{ color: "#FAC775" }}>
-        ⚠ {drop}% dropped
-      </span>
-    );
+    return <span style={{ color: "#FAC775" }}>⚠ {drop}% dropped</span>;
   }
   if (status === "ingestion-gap") {
     return <span style={{ color: "#F09595" }}>⚠ all dropped</span>;
@@ -201,8 +214,8 @@ export default async function DebugStatsPage() {
         <div>
           <h1 className="text-lg font-medium mb-1">Stats verification</h1>
           <p className="text-sm text-text-secondary">
-            Raw BattleRecord counts vs aggregated MapBrawlerStat vs what the
-            homepage displays. All three columns should agree.
+            Raw BattleRecord counts vs aggregated stats vs what the homepage
+            displays. Numbers should agree within rounding.
           </p>
         </div>
         <Link
@@ -220,22 +233,24 @@ export default async function DebugStatsPage() {
           <div className="text-xl font-medium">
             {totals.totalBattles.toLocaleString()}
           </div>
-          <div className="text-[11px] text-text-tertiary">in BattleRecord</div>
+          <div className="text-[11px] text-text-tertiary">raw in BattleRecord</div>
         </div>
         <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">
-            Dropped in aggregation
-          </div>
-          <div
-            className="text-xl font-medium"
-            style={{
-              color: totals.overallDropPercent > 5 ? "#FAC775" : "#5DCAA5",
-            }}
-          >
-            {totals.overallDropPercent}%
+          <div className="text-xs text-text-secondary mb-1">Counted in meta</div>
+          <div className="text-xl font-medium" style={{ color: "#5DCAA5" }}>
+            {totals.totalAggregatedSamples.toLocaleString()}
           </div>
           <div className="text-[11px] text-text-tertiary">
-            {totals.totalDropped.toLocaleString()} battles lost
+            {totals.countedPercent}% of total
+          </div>
+        </div>
+        <div className="bg-bg-secondary rounded-lg p-4">
+          <div className="text-xs text-text-secondary mb-1">Excluded</div>
+          <div className="text-xl font-medium" style={{ color: "#FAC775" }}>
+            {(totals.excludedByMode + totals.excludedByMap).toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-tertiary">
+            5v5 events, retired modes
           </div>
         </div>
         <div className="bg-bg-secondary rounded-lg p-4">
@@ -243,53 +258,48 @@ export default async function DebugStatsPage() {
           <div className="text-xl font-medium" style={{ color: "#5DCAA5" }}>
             {totals.healthyRows}/{totals.totalBrawlers}
           </div>
-          <div className="text-[11px] text-text-tertiary">raw = aggregated</div>
-        </div>
-        <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">Issues</div>
-          <div
-            className="text-xl font-medium"
-            style={{
-              color:
-                totals.partialGapRows + totals.mismatchRows + totals.gapRows >
-                0
-                  ? "#ED93B1"
-                  : "var(--text-primary)",
-            }}
-          >
-            {totals.partialGapRows + totals.mismatchRows + totals.gapRows}
-          </div>
-          <div className="text-[11px] text-text-tertiary">
-            {totals.partialGapRows} gap · {totals.mismatchRows} mismatch
-          </div>
+          <div className="text-[11px] text-text-tertiary">raw ≈ aggregated</div>
         </div>
       </div>
 
-      {totals.overallDropPercent > 5 && (
-        <div
-          className="mb-6 p-4 rounded-lg border"
-          style={{
-            background: "rgba(250, 199, 117, 0.08)",
-            borderColor: "rgba(250, 199, 117, 0.3)",
-          }}
-        >
-          <div className="text-sm font-medium mb-1" style={{ color: "#FAC775" }}>
-            ⚠ Aggregator is dropping {totals.overallDropPercent}% of your
-            harvested data
+      {/* Exclusion explanation */}
+      <div
+        className="mb-6 p-4 rounded-lg border"
+        style={{
+          background: "rgba(133, 183, 235, 0.06)",
+          borderColor: "rgba(133, 183, 235, 0.2)",
+        }}
+      >
+        <div className="text-sm font-medium mb-2" style={{ color: "#85B7EB" }}>
+          Why {totals.excludedByMode + totals.excludedByMap > 0
+            ? Math.round(
+                ((totals.excludedByMode + totals.excludedByMap) /
+                  totals.totalBattles) *
+                  1000
+              ) / 10
+            : 0}
+          % of raw data is excluded from meta stats
+        </div>
+        <div className="text-xs text-text-secondary space-y-1">
+          <div>
+            <strong>{totals.excludedByMode.toLocaleString()}</strong> battles
+            excluded by mode — not in the 9 tracked competitive modes (Gem
+            Grab, Brawl Ball, Bounty, Heist, Hot Zone, Knockout, Siege,
+            Wipeout, Duels).
           </div>
-          <div className="text-xs text-text-secondary">
-            This usually means map names from the Brawl Stars API don't match
-            any row in your Map table. See which ones on the{" "}
-            <Link
-              href="/debug/maps"
-              className="underline hover:text-text-primary"
-            >
-              Inspect maps
-            </Link>{" "}
-            page.
+          <div>
+            <strong>{totals.excludedByMap.toLocaleString()}</strong> battles
+            excluded by map — tracked mode but the map isn't in our Map table.
+            Mostly 5v5 Brawl Ball events (Insane Streamer, No Good Deed, etc.)
+            that the Brawl Stars API tags as "brawlBall" with no clean
+            3v3/5v5 distinction, plus retired Siege maps.
+          </div>
+          <div className="pt-1 text-text-tertiary">
+            This is intentional — we track classic 3v3 ranked competitive.
+            Raw battles stay in BattleRecord for transparency and forkability.
           </div>
         </div>
-      )}
+      </div>
 
       {totals.latestAggregation && (
         <div className="text-xs text-text-tertiary mb-4">
@@ -308,7 +318,9 @@ export default async function DebugStatsPage() {
           <thead className="bg-bg-secondary text-text-secondary">
             <tr>
               <th className="text-left px-3 py-2 font-medium">Brawler</th>
-              <th className="text-right px-3 py-2 font-medium">Battles</th>
+              <th className="text-right px-3 py-2 font-medium">
+                Tracked battles
+              </th>
               <th className="text-right px-3 py-2 font-medium">W / L</th>
               <th className="text-right px-3 py-2 font-medium">Raw WR</th>
               <th className="text-right px-3 py-2 font-medium">
@@ -359,23 +371,22 @@ export default async function DebugStatsPage() {
         </table>
       </div>
 
-      {/* Legend */}
       <div className="mt-6 text-xs text-text-secondary space-y-2">
         <div>
-          <span style={{ color: "#5DCAA5" }}>✓ match</span> — raw and aggregated
-          agree within 0.5pp, sample sizes align.
+          <span style={{ color: "#5DCAA5" }}>✓ match</span> — raw and
+          aggregated agree within 0.5pp, sample sizes align.
         </div>
         <div>
-          <span style={{ color: "#FAC775" }}>⚠ N% dropped</span> — aggregator is
-          missing battles for this brawler. Check the maps debug page.
+          <span style={{ color: "#FAC775" }}>⚠ N% dropped</span> — aggregator
+          missing battles for this brawler on unknown maps (usually 5v5).
         </div>
         <div>
           <span style={{ color: "#F09595" }}>⚠ all dropped</span> — aggregator
-          saw zero battles despite raw data. Map names or brawler name mismatch.
+          saw zero battles despite raw data. Brawler name mismatch.
         </div>
         <div>
-          <span style={{ color: "#ED93B1" }}>✗ off by Xpp</span> — sample sizes
-          match but winrates diverge. Real bug in the aggregator logic.
+          <span style={{ color: "#ED93B1" }}>✗ off by Xpp</span> — sample
+          sizes match but winrates diverge. Real bug.
         </div>
       </div>
     </div>

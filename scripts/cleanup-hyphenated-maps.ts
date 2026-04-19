@@ -1,46 +1,89 @@
+/**
+ * One-time cleanup: delete BattleRecord rows from novelty modes that we
+ * no longer track. Safe to run — it only drops battles whose gameMode
+ * doesn't match our current COMPETITIVE_MODES allowlist.
+ *
+ * After running this + scripts/aggregate.ts, the /debug/stats page should
+ * show near-zero dropped battles and healthy rows across the board.
+ *
+ * Usage:
+ *   npx tsx scripts/cleanup-untracked-modes.ts
+ */
+
 import { PrismaClient } from "@prisma/client";
+
+// Must match COMPETITIVE_MODES in harvest.ts and leaderboard-harvester.ts
+const TRACKED_MODES = [
+  "gemGrab",
+  "brawlBall",
+  "bounty",
+  "heist",
+  "hotZone",
+  "knockout",
+  "siege",
+  "wipeout",
+  "duels",
+];
 
 async function main() {
   const prisma = new PrismaClient();
-  console.log("\n=== Hyphenated Map Cleanup ===\n");
+  console.log("\n=== Untracked Mode Cleanup ===\n");
 
-  const badMaps = await prisma.map.findMany({
-    where: { name: { contains: "-" } },
-    select: { id: true, name: true },
+  // Count what's about to be deleted, grouped so we can see the damage
+  const toDelete = await prisma.battleRecord.groupBy({
+    by: ["gameMode"],
+    _count: { _all: true },
+    where: { gameMode: { notIn: TRACKED_MODES } },
   });
 
-  if (badMaps.length === 0) {
-    console.log("No hyphenated maps found. Nothing to clean.\n");
+  if (toDelete.length === 0) {
+    console.log("No untracked battles found. Nothing to clean.\n");
     await prisma.$disconnect();
     return;
   }
 
-  console.log(`Found ${badMaps.length} hyphenated map rows.`);
-  console.log("Preview (first 10):");
-  for (const m of badMaps.slice(0, 10)) {
-    console.log(`  - ${m.name}`);
+  const totalToDelete = toDelete.reduce((s, r) => s + r._count._all, 0);
+  console.log(`About to delete ${totalToDelete.toLocaleString()} BattleRecord rows:`);
+  for (const row of toDelete.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(
+      `  ${row.gameMode.padEnd(20)} ${row._count._all.toLocaleString()} battles`
+    );
   }
-  if (badMaps.length > 10) {
-    console.log(`  ... and ${badMaps.length - 10} more`);
+
+  console.log("\nDeleting...");
+  const result = await prisma.battleRecord.deleteMany({
+    where: { gameMode: { notIn: TRACKED_MODES } },
+  });
+  console.log(`Deleted ${result.count.toLocaleString()} rows.\n`);
+
+  // Also blow away MapBrawlerStat rows where the map belongs to a dropped mode
+  // (future-proofing — mostly a no-op since our map-sync already filters)
+  console.log("Checking for orphan MapBrawlerStat rows...");
+  const orphanMaps = await prisma.map.findMany({
+    where: { gameMode: { name: { notIn: [
+      "Gem Grab", "Brawl Ball", "Bounty", "Heist", "Hot Zone",
+      "Knockout", "Siege", "Wipeout", "Duels",
+    ] } } },
+    select: { id: true },
+  });
+  if (orphanMaps.length > 0) {
+    const orphanIds = orphanMaps.map((m) => m.id);
+    const statDelete = await prisma.mapBrawlerStat.deleteMany({
+      where: { mapId: { in: orphanIds } },
+    });
+    const mapDelete = await prisma.map.deleteMany({
+      where: { id: { in: orphanIds } },
+    });
+    console.log(
+      `  Deleted ${statDelete.count} stat rows and ${mapDelete.count} map rows from untracked modes.\n`
+    );
+  } else {
+    console.log("  None found.\n");
   }
-
-  const badIds = badMaps.map((m) => m.id);
-
-  console.log("\nDeleting MapBrawlerStat rows attached to these maps...");
-  const deletedStats = await prisma.mapBrawlerStat.deleteMany({
-    where: { mapId: { in: badIds } },
-  });
-  console.log(`  Deleted ${deletedStats.count} stat rows.`);
-
-  console.log("\nDeleting the hyphenated Map rows...");
-  const deletedMaps = await prisma.map.deleteMany({
-    where: { id: { in: badIds } },
-  });
-  console.log(`  Deleted ${deletedMaps.count} map rows.\n`);
 
   console.log("Done. Next:");
-  console.log("  npx tsx scripts/sync-maps.ts");
-  console.log("  npx tsx scripts/aggregate.ts\n");
+  console.log("  npx tsx scripts/aggregate.ts");
+  console.log("  (then refresh /debug/stats)\n");
 
   await prisma.$disconnect();
 }

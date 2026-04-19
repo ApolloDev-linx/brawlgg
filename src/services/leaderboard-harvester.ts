@@ -6,18 +6,33 @@
  * 2. Processing each player's battle log
  * 3. Chain-harvesting unique tags seen in those battles (1 level deep)
  * 4. Running stat aggregation at the end
+ *
+ * Tracked modes (product decision — competitive ranked focus):
+ *   Classic 3v3: Gem Grab, Brawl Ball, Bounty, Heist, Hot Zone, Knockout, Siege
+ *   Plus:        Wipeout (3v3), Duels (1v1)
+ * Excluded: all novelty modes (Basket/Volley Brawl, Payload, Brawl Hockey,
+ *           Brawl Arena), 2v2/5v5 variants, Showdown, PvE
  */
+
 import { PrismaClient } from "@prisma/client";
 import { fetchLeaderboard, fetchPlayerBattleLog } from "./brawlstars-api";
 import { aggregateStats } from "./stat-aggregator";
 
 const COMPETITIVE_MODES = new Set([
-  "gemGrab", "brawlBall", "bounty", "heist", "hotZone", "knockout", "siege",
-  "duels", "wipeout", "payload", "basketBrawl", "volleyBrawl",
+  "gemGrab",
+  "brawlBall",
+  "bounty",
+  "heist",
+  "hotZone",
+  "knockout",
+  "siege",
+  "wipeout",
+  "duels",
 ]);
 
 const REQUEST_DELAY = 200;
 const MAX_CHAIN_TAGS = 300;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface HarvestResult {
@@ -44,12 +59,10 @@ async function processPlayer(
   }
 
   const items: any[] = battleLog?.items || [];
-
   for (const item of items) {
     try {
       const battle = item.battle;
       const event = item.event;
-
       if (!event?.map || !battle?.mode) { result.skipped++; continue; }
       if (!COMPETITIVE_MODES.has(battle.mode)) { result.skipped++; continue; }
       if (battle.type === "friendly" || battle.type === "practice") { result.skipped++; continue; }
@@ -62,7 +75,6 @@ async function processPlayer(
       const gameMode = battle.mode;
       const starPlayerTag = battle.starPlayer?.tag;
 
-      // KEY FIX: ranked uses battle.players (flat), normal uses battle.teams (nested)
       const teams: any[][] = battle.teams || [];
       const allPlayers: any[] = battle.players
         ? battle.players
@@ -70,7 +82,6 @@ async function processPlayer(
 
       for (const player of allPlayers) {
         if (!player?.brawler?.name || !player?.tag) continue;
-
         const cleanTag = (player.tag as string).replace(/^#/, "");
         if (cleanTag !== playerTag) result.chainTags.push(cleanTag);
 
@@ -78,11 +89,9 @@ async function processPlayer(
         const brawlerName = rawName
           .toLowerCase()
           .replace(/\b\w/g, (c: string) => c.toUpperCase());
-
         const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
         const isStarPlayer = player.tag === starPlayerTag;
 
-        // For team-based modes flip result for team 1, ranked flat lists are already correct
         let playerResult = battleResult;
         if (teams.length > 0) {
           const playerTeamIndex = teams.findIndex((t) =>
@@ -123,7 +132,6 @@ async function processPlayer(
       result.skipped++;
     }
   }
-
   return result;
 }
 
