@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getTier } from "@/lib/constants";
+import { aggregateBrawlerStats } from "@/lib/stats-utils";
 import type { MetaOverview, MetaSnapshot } from "@/types/meta";
 
 /**
@@ -15,29 +16,17 @@ export async function getMetaOverview(): Promise<MetaOverview> {
     },
   });
 
-  // Aggregate stats across all maps for each brawler
+  // Aggregate stats across all maps for each brawler (weighted by sampleSize)
   const snapshots: MetaSnapshot[] = brawlers.map((b) => {
-    const stats = b.mapStats;
-    const avgWinRate =
-      stats.length > 0
-        ? stats.reduce((s, st) => s + st.winRate, 0) / stats.length
-        : 50;
-    const avgPickRate =
-      stats.length > 0
-        ? stats.reduce((s, st) => s + st.pickRate, 0) / stats.length
-        : 0;
-    const avgBanRate =
-      stats.length > 0
-        ? stats.reduce((s, st) => s + st.banRate, 0) / stats.length
-        : 0;
+    const agg = aggregateBrawlerStats(b.mapStats);
 
     return {
       brawlerId: b.id,
       brawlerName: b.name,
-      winRate: Math.round(avgWinRate * 10) / 10,
-      pickRate: Math.round(avgPickRate * 10) / 10,
-      banRate: Math.round(avgBanRate * 10) / 10,
-      tier: getTier(avgWinRate),
+      winRate: agg.winRate,
+      pickRate: agg.pickRate,
+      banRate: agg.banRate,
+      tier: getTier(agg.winRate),
       snapshotDate: new Date().toISOString(),
     };
   });

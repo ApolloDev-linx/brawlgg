@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, getTier } from "@/lib/constants";
+import { aggregateBrawlerStats } from "@/lib/stats-utils";
 import { DraftBoard } from "@/components/draft/DraftBoard";
 
 async function getBrawlers() {
@@ -11,19 +12,7 @@ async function getBrawlers() {
     });
 
     return brawlers.map((b) => {
-      const stats = b.mapStats;
-      const avgWin =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.winRate, 0) / stats.length
-          : 50;
-      const avgPick =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.pickRate, 0) / stats.length
-          : 0;
-      const avgBan =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.banRate, 0) / stats.length
-          : 0;
+      const agg = aggregateBrawlerStats(b.mapStats);
 
       return {
         id: b.id,
@@ -32,10 +21,10 @@ async function getBrawlers() {
         type: b.type as any,
         hp: b.hp,
         iconUrl: b.iconUrl,
-        winRate: Math.round(avgWin * 10) / 10,
-        pickRate: Math.round(avgPick * 10) / 10,
-        banRate: Math.round(avgBan * 10) / 10,
-        tier: getTier(avgWin),
+        winRate: agg.winRate,
+        pickRate: agg.pickRate,
+        banRate: agg.banRate,
+        tier: getTier(agg.winRate),
       };
     });
   });

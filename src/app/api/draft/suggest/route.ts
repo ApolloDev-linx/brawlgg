@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { suggestPick, computeAdvantage } from "@/services/draft-engine";
 import { getTier } from "@/lib/constants";
+import { aggregateBrawlerStats } from "@/lib/stats-utils";
 import type { BrawlerWithStats } from "@/types/brawler";
 import type { DraftState } from "@/types/meta";
 
@@ -16,19 +17,7 @@ export async function POST(request: Request) {
     });
 
     const brawlersWithStats: BrawlerWithStats[] = allBrawlers.map((b) => {
-      const stats = b.mapStats;
-      const avgWin =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.winRate, 0) / stats.length
-          : 50;
-      const avgPick =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.pickRate, 0) / stats.length
-          : 0;
-      const avgBan =
-        stats.length > 0
-          ? stats.reduce((s, st) => s + st.banRate, 0) / stats.length
-          : 0;
+      const agg = aggregateBrawlerStats(b.mapStats);
 
       return {
         id: b.id,
@@ -37,10 +26,10 @@ export async function POST(request: Request) {
         type: b.type as any,
         hp: b.hp,
         iconUrl: b.iconUrl,
-        winRate: Math.round(avgWin * 10) / 10,
-        pickRate: Math.round(avgPick * 10) / 10,
-        banRate: Math.round(avgBan * 10) / 10,
-        tier: getTier(avgWin),
+        winRate: agg.winRate,
+        pickRate: agg.pickRate,
+        banRate: agg.banRate,
+        tier: getTier(agg.winRate),
       };
     });
 

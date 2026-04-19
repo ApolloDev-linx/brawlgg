@@ -2,11 +2,12 @@
  * Recompute win rates and tier assignments.
  * Run every 2 hours via cron.
  *
- * In production, this would pull from match data.
- * For now it recalculates tiers from existing map stats.
+ * Pulls per-map stats, weights them by sampleSize to get a correct
+ * brawler-level win rate, then updates tier and writes a daily snapshot.
  */
 
 import { PrismaClient } from "@prisma/client";
+import { aggregateBrawlerStats, WeightedStat } from "@/lib/stats-utils";
 
 const prisma = new PrismaClient();
 
@@ -23,26 +24,23 @@ export async function computeWinRates() {
   try {
     const stats = await prisma.mapBrawlerStat.findMany();
 
-    // Group by brawler
-    const brawlerStats: Record<
-      string,
-      { wins: number[]; picks: number[]; bans: number[] }
-    > = {};
+    // Group per-map rows by brawler, keeping sampleSize so we can weight
+    const brawlerStats: Record<string, WeightedStat[]> = {};
 
     for (const s of stats) {
-      if (!brawlerStats[s.brawlerId]) {
-        brawlerStats[s.brawlerId] = { wins: [], picks: [], bans: [] };
-      }
-      brawlerStats[s.brawlerId].wins.push(s.winRate);
-      brawlerStats[s.brawlerId].picks.push(s.pickRate);
-      brawlerStats[s.brawlerId].bans.push(s.banRate);
+      if (!brawlerStats[s.brawlerId]) brawlerStats[s.brawlerId] = [];
+      brawlerStats[s.brawlerId].push({
+        winRate: s.winRate,
+        pickRate: s.pickRate,
+        banRate: s.banRate,
+        sampleSize: s.sampleSize,
+      });
     }
 
-    // Update tiers in map stats
-    for (const [brawlerId, data] of Object.entries(brawlerStats)) {
-      const avgWin =
-        data.wins.reduce((s, v) => s + v, 0) / data.wins.length;
-      const tier = getTier(avgWin);
+    // Update tiers in map stats using weighted brawler-level win rate
+    for (const [brawlerId, rows] of Object.entries(brawlerStats)) {
+      const agg = aggregateBrawlerStats(rows);
+      const tier = getTier(agg.winRate);
 
       await prisma.mapBrawlerStat.updateMany({
         where: { brawlerId },
@@ -54,30 +52,25 @@ export async function computeWinRates() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    for (const [brawlerId, data] of Object.entries(brawlerStats)) {
-      const avgWin =
-        data.wins.reduce((s, v) => s + v, 0) / data.wins.length;
-      const avgPick =
-        data.picks.reduce((s, v) => s + v, 0) / data.picks.length;
-      const avgBan =
-        data.bans.reduce((s, v) => s + v, 0) / data.bans.length;
+    for (const [brawlerId, rows] of Object.entries(brawlerStats)) {
+      const agg = aggregateBrawlerStats(rows);
 
       await prisma.metaSnapshot.upsert({
         where: {
           brawlerId_snapshotDate: { brawlerId, snapshotDate: today },
         },
         update: {
-          winRate: Math.round(avgWin * 10) / 10,
-          pickRate: Math.round(avgPick * 10) / 10,
-          banRate: Math.round(avgBan * 10) / 10,
-          tier: getTier(avgWin),
+          winRate: agg.winRate,
+          pickRate: agg.pickRate,
+          banRate: agg.banRate,
+          tier: getTier(agg.winRate),
         },
         create: {
           brawlerId,
-          winRate: Math.round(avgWin * 10) / 10,
-          pickRate: Math.round(avgPick * 10) / 10,
-          banRate: Math.round(avgBan * 10) / 10,
-          tier: getTier(avgWin),
+          winRate: agg.winRate,
+          pickRate: agg.pickRate,
+          banRate: agg.banRate,
+          tier: getTier(agg.winRate),
           snapshotDate: today,
         },
       });
