@@ -30,8 +30,9 @@ const TRACKED_MODE_NAMES = new Set<string>([
   "HOT-ZONE",
   "KNOCKOUT",
   "SIEGE",
+  "WIPEOUT",
+  "DUELS",
 ]);
-
 const MODE_NAME_TO_DISPLAY: Record<string, string> = {
   "GEM-GRAB": "Gem Grab",
   "BRAWL-BALL": "Brawl Ball",
@@ -40,8 +41,9 @@ const MODE_NAME_TO_DISPLAY: Record<string, string> = {
   "HOT-ZONE": "Hot Zone",
   KNOCKOUT: "Knockout",
   SIEGE: "Siege",
+  WIPEOUT: "Wipeout",
+  DUELS: "Duels",
 };
-
 interface BrawlifyMap {
   id: number;
   name: string;
@@ -79,7 +81,7 @@ function normalizeMapName(raw: string): string {
 }
 
 async function fetchBrawlifyMaps(): Promise<BrawlifyMap[]> {
-  const res = await fetch("https://api.brawlapi.com/v1/maps", {
+const res = await fetch("https://api.brawlify.com/v1/maps", {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(30_000),
   });
@@ -115,16 +117,15 @@ export async function syncMaps(prisma: PrismaClient): Promise<MapSyncResult> {
   result.fetched = rawMaps.length;
 
   const tracked = rawMaps.filter((m) => {
-    const modeName = m.gameMode?.name?.toUpperCase();
+    const modeName = m.gameMode?.name?.toUpperCase().replace(/ /g, "-");
     if (!modeName) return false;
     return TRACKED_MODE_NAMES.has(modeName);
-  });
-
+});
   result.filteredIn = tracked.length;
 
   const seenUntracked = new Set<string>();
   for (const m of rawMaps) {
-    const modeName = m.gameMode?.name?.toUpperCase();
+const modeName = m.gameMode?.name?.toUpperCase().replace(/ /g, "-");
     if (modeName && !TRACKED_MODE_NAMES.has(modeName)) {
       seenUntracked.add(modeName);
     }
@@ -157,7 +158,7 @@ export async function syncMaps(prisma: PrismaClient): Promise<MapSyncResult> {
   const seenKeys = new Set<string>();
 
   for (const m of tracked) {
-    const internalMode = m.gameMode?.name?.toUpperCase();
+const internalMode = m.gameMode?.name?.toUpperCase().replace(/ /g, "-");
     if (!internalMode) {
       result.skipped++;
       continue;
