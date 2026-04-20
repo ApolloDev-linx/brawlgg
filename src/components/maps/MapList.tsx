@@ -2,14 +2,21 @@
 
 import { useState } from "react";
 import { TIER_COLORS, TYPE_COLORS, TYPE_LABELS, MODE_ICONS } from "@/lib/constants";
+import {
+  pickFirstPick,
+  pickSafest,
+  pickHighRiskHighReward,
+} from "@/lib/stats-utils";
 
 interface BrawlerStat {
   id: string;
   winRate: number;
   pickRate: number;
   banRate: number;
+  sampleSize: number;
+  isReal: boolean;
   tier: string;
-  pickCategory: string | null;
+  pickCategory: string | null; // legacy field — no longer used by the cards
   brawler: {
     id: string;
     name: string;
@@ -150,9 +157,15 @@ function MapDetail({
   onBack: () => void;
 }) {
   const stats = map.brawlerStats;
-  const firstPick = stats.find((s) => s.pickCategory === "first_pick") || stats[0];
-  const safePick = stats.find((s) => s.pickCategory === "safe") || stats[1];
-  const riskPick = stats.find((s) => s.pickCategory === "high_risk") || stats[stats.length - 1];
+
+  // Pick selectors derive callouts from real win/pick/sample data instead
+  // of the legacy `pickCategory` field, which used a banRate threshold we
+  // never had real data for. See stats-utils.ts for thresholds + rationale.
+  // Each can return null — render conditionally so we never fake a callout
+  // the data doesn't support.
+  const firstPick = pickFirstPick(stats);
+  const safePick = pickSafest(stats);
+  const riskPick = pickHighRiskHighReward(stats);
 
   return (
     <div>
@@ -186,7 +199,7 @@ function MapDetail({
               {firstPick.brawler.name}
             </div>
             <div className="text-[11px] text-text-tertiary">
-              {firstPick.winRate}% win rate
+              {firstPick.winRate}% WR · {firstPick.pickRate}% pick
             </div>
           </div>
         )}
@@ -199,7 +212,7 @@ function MapDetail({
               {safePick.brawler.name}
             </div>
             <div className="text-[11px] text-text-tertiary">
-              Consistent in all matchups
+              {safePick.winRate}% WR · {safePick.pickRate}% pick
             </div>
           </div>
         )}
@@ -212,7 +225,7 @@ function MapDetail({
               {riskPick.brawler.name}
             </div>
             <div className="text-[11px] text-text-tertiary">
-              Situational but strong
+              {riskPick.winRate}% WR · {riskPick.pickRate}% pick (niche)
             </div>
           </div>
         )}

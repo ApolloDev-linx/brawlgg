@@ -2,7 +2,8 @@
  * stats-utils.ts
  *
  * Shared helpers for aggregating per-map brawler stats into a single
- * brawler-level summary.
+ * brawler-level summary, plus pick-callout selectors for map detail
+ * pages.
  *
  * Why this file exists:
  *   MapBrawlerStat rows can be either real (sampleSize > 0, isReal=true) or
@@ -130,4 +131,79 @@ export function wilsonScoreLowerBound(
     p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
   const denominator = 1 + z2 / n;
   return numerator / denominator;
+}
+
+// ---------------------------------------------------------------------------
+// Map-detail pick selectors
+// ---------------------------------------------------------------------------
+//
+// These replace the old `pickCategory` field set by the aggregator. That
+// field used a banRate threshold for the "high risk" category, but since
+// banRate is hardcoded to 0 in the pipeline (we have no real ban data
+// from the API), the threshold never matched and the card always fell
+// back to `stats[stats.length - 1]` — i.e. the WORST brawler on the map
+// got displayed as "high risk / reward." The other two categories drifted
+// for similar reasons.
+//
+// The new selectors take the map's brawler list (already Wilson-sorted by
+// the page) and pick three callouts using only data we actually have:
+// observed win rate, observed pick rate, and whether the row crosses the
+// real-sample threshold.
+//
+// Thresholds are tuning knobs — bump them if too many maps hit the empty
+// fallback, lower if every map shows the same brawler in two cards.
+
+export interface MapPickRow {
+  winRate: number;
+  pickRate: number;
+  sampleSize: number;
+  isReal: boolean;
+}
+
+/**
+ * "Best first pick" — top of the map's Wilson-sorted list, restricted to
+ * brawlers with a real sample. Falls back to stats[0] only if no brawler
+ * on the map has crossed MIN_SAMPLE yet (fresh maps in the rotation).
+ *
+ * Returns null only if the map has zero brawler rows at all.
+ */
+export function pickFirstPick<T extends MapPickRow>(stats: T[]): T | null {
+  return stats.find((s) => s.isReal) ?? stats[0] ?? null;
+}
+
+/**
+ * "Safest pick" — the consensus call. Above-average win rate AND popular
+ * enough that the result isn't a curiosity. Both checks matter:
+ *   - high WR + low pick = niche meta call ("high risk / reward" territory)
+ *   - high pick + low WR = popular trap, not safe
+ * Among brawlers that pass both, the most-picked is the one the
+ * community has converged on as a reliable choice.
+ *
+ * Returns null if no brawler on this map qualifies — preferable to faking
+ * a "safe pick" we can't actually back with data.
+ */
+export function pickSafest<T extends MapPickRow>(stats: T[]): T | null {
+  const candidates = stats.filter(
+    (s) => s.isReal && s.winRate >= 51 && s.pickRate >= 3
+  );
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => b.pickRate - a.pickRate)[0];
+}
+
+/**
+ * "High risk / high reward" — under-the-radar but punching above weight.
+ * Low pick rate (niche / off-meta) but high observed win rate when chosen.
+ * The isReal filter prevents a 3-0 statistical mirage from getting
+ * promoted as a pro pick.
+ *
+ * Returns null if no brawler on this map qualifies.
+ */
+export function pickHighRiskHighReward<T extends MapPickRow>(
+  stats: T[]
+): T | null {
+  const candidates = stats.filter(
+    (s) => s.isReal && s.winRate >= 53 && s.pickRate < 3
+  );
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => b.winRate - a.winRate)[0];
 }
