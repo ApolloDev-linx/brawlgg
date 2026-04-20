@@ -18,9 +18,10 @@
  *   Basket Brawl, Volley Brawl, Payload, Brawl Hockey, Brawl Arena,
  *   all 2v2/5v5 variants, Showdown (solo/duo), PvE modes
  */
-
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
+import { toBrawlerName } from "../src/lib/brawler-name";
+
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
@@ -105,23 +106,19 @@ async function processPlayer(
       const mapName: string = event.map;
       const gameMode: string = battle.mode;
       const starPlayerTag: string | undefined = battle.starPlayer?.tag;
-
       const teams: any[][] = battle.teams || [];
       const allPlayers: any[] = battle.players
         ? battle.players
         : teams.flat();
-
       for (const player of allPlayers) {
         if (!player?.brawler?.name || !player?.tag) continue;
         const cleanTag = (player.tag as string).replace(/^#/, "");
         if (cleanTag !== tag) out.chainTags.push(cleanTag);
-
-        const brawlerName = (player.brawler.name as string)
-          .toLowerCase()
-          .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        // Canonical name via shared util — must match brawler-sync output
+        // so battle records correctly link to their brawlerId.
+        const brawlerName = toBrawlerName(player.brawler.name as string);
         const brawlerId = brawlerIdByName[brawlerName.toLowerCase()] ?? null;
         const isStarPlayer = player.tag === starPlayerTag;
-
         let playerResult = battleResult;
         if (teams.length > 0) {
           const playerTeamIndex = teams.findIndex((t) =>
@@ -131,7 +128,6 @@ async function processPlayer(
             playerResult = battleResult === "victory" ? "defeat" : "victory";
           }
         }
-
         try {
           await prisma.battleRecord.upsert({
             where: {
@@ -174,12 +170,10 @@ async function processPlayer(
 async function main() {
   const prisma = new PrismaClient();
   console.log("=== BrawlGG Leaderboard Harvester ===\n");
-
   const dbBrawlers = await prisma.brawler.findMany({ select: { id: true, name: true } });
   const brawlerIdByName: Record<string, string> = {};
   for (const b of dbBrawlers) brawlerIdByName[b.name.toLowerCase()] = b.id;
   console.log(`Loaded ${dbBrawlers.length} brawlers from DB\n`);
-
   const regions = ["global", "US", "GB", "KR", "BR"];
   const seenTags = new Set<string>();
   const leaderboardTags: string[] = [];
@@ -198,7 +192,6 @@ async function main() {
     }
   }
   console.log(`\nTotal leaderboard players: ${leaderboardTags.length}\n`);
-
   let totalSaved = 0;
   let totalSkipped = 0;
   const chainPool = new Set<string>();
@@ -214,7 +207,6 @@ async function main() {
     await sleep(200);
   }
   console.log(`\n\nLeaderboard sweep done. Saved ${totalSaved} battles.\n`);
-
   const chainTags = Array.from(chainPool).filter((t) => !seenTags.has(t)).slice(0, 400);
   console.log(`Chain harvesting ${chainTags.length} additional players...\n`);
   for (let i = 0; i < chainTags.length; i++) {
@@ -233,7 +225,6 @@ async function main() {
   console.log(`  Total battles saved: ${totalSaved}`);
   console.log(`  Total skipped:       ${totalSkipped}`);
   console.log(`  Players processed:   ${seenTags.size}`);
-
   await prisma.$disconnect();
   console.log("\nDone! Run the aggregate cron or hit /api/cron/aggregate to compute real stats.");
 }

@@ -123,34 +123,50 @@ async function main() {
   const allMaps = await prisma.map.findMany();
   console.log(`  Total maps: ${allMaps.length}\n`);
 
-  console.log("[4/5] Map brawler stats");
-  let statsCount = 0;
-  const allBrawlers = await prisma.brawler.findMany();
-  for (const map of allMaps) {
-    for (const brawler of allBrawlers) {
-      const baseWin = 45 + Math.random() * 15;
-      const winRate = Math.round(baseWin * 10) / 10;
-      const pickRate = Math.round((2 + Math.random() * 10) * 10) / 10;
-      const banRate = Math.round(Math.random() * 8 * 10) / 10;
-      let tier: string;
-      if (winRate >= 54) tier = "S";
-      else if (winRate >= 51) tier = "A";
-      else if (winRate >= 48) tier = "B";
-      else tier = "C";
-      let pickCategory: string | null = null;
-      if (winRate >= 54 && pickRate >= 8) pickCategory = "first_pick";
-      else if (winRate >= 51 && banRate < 3) pickCategory = "safe";
-      else if (winRate >= 53 && banRate >= 5) pickCategory = "high_risk";
-      await prisma.mapBrawlerStat.upsert({
-        where: { mapId_brawlerId: { mapId: map.id, brawlerId: brawler.id } },
-        update: { winRate, pickRate, banRate, tier, pickCategory },
-        create: { mapId: map.id, brawlerId: brawler.id, winRate, pickRate, banRate, tier, pickCategory },
-      });
-      statsCount++;
+ console.log("[4/5] Map brawler stats (placeholder, real ones come from aggregator)");
+let statsCount = 0;
+let skipped = 0;
+const allBrawlers = await prisma.brawler.findMany();
+for (const map of allMaps) {
+  for (const brawler of allBrawlers) {
+    // Only create a placeholder if no row exists. NEVER touch real data.
+    const existing = await prisma.mapBrawlerStat.findUnique({
+      where: { mapId_brawlerId: { mapId: map.id, brawlerId: brawler.id } },
+    });
+    if (existing) {
+      skipped++;
+      continue;
     }
+    const baseWin = 45 + Math.random() * 15;
+    const winRate = Math.round(baseWin * 10) / 10;
+    const pickRate = Math.round((2 + Math.random() * 10) * 10) / 10;
+    const banRate = Math.round(Math.random() * 8 * 10) / 10;
+    let tier: string;
+    if (winRate >= 54) tier = "S";
+    else if (winRate >= 51) tier = "A";
+    else if (winRate >= 48) tier = "B";
+    else tier = "C";
+    let pickCategory: string | null = null;
+    if (winRate >= 54 && pickRate >= 8) pickCategory = "first_pick";
+    else if (winRate >= 51 && banRate < 3) pickCategory = "safe";
+    else if (winRate >= 53 && banRate >= 5) pickCategory = "high_risk";
+    await prisma.mapBrawlerStat.create({
+      data: {
+        mapId: map.id,
+        brawlerId: brawler.id,
+        winRate,
+        pickRate,
+        banRate,
+        tier,
+        pickCategory,
+        sampleSize: 0,
+        isReal: false,
+      },
+    });
+    statsCount++;
   }
-  console.log(`  Generated ${statsCount} stat records\n`);
-
+}
+console.log(`  Created ${statsCount} placeholder rows, skipped ${skipped} existing\n`);
   console.log("[5/5] Counter matchups");
   let counterCount = 0;
   for (const brawler of allBrawlers) {

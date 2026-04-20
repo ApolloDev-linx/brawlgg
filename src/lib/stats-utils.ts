@@ -40,18 +40,15 @@ export interface AggregatedStats {
  */
 export function aggregateBrawlerStats(stats: WeightedStat[]): AggregatedStats {
   const totalSamples = stats.reduce((s, st) => s + st.sampleSize, 0);
-
   if (totalSamples === 0) {
     return { winRate: 50, pickRate: 0, banRate: 0, sampleSize: 0 };
   }
-
   const winRate =
     stats.reduce((s, st) => s + st.winRate * st.sampleSize, 0) / totalSamples;
   const pickRate =
     stats.reduce((s, st) => s + st.pickRate * st.sampleSize, 0) / totalSamples;
   const banRate =
     stats.reduce((s, st) => s + st.banRate * st.sampleSize, 0) / totalSamples;
-
   return {
     winRate: Math.round(winRate * 10) / 10,
     pickRate: Math.round(pickRate * 10) / 10,
@@ -69,4 +66,39 @@ export const MIN_TRUSTED_SAMPLE = 50;
 
 export function isTrustedSample(sampleSize: number): boolean {
   return sampleSize >= MIN_TRUSTED_SAMPLE;
+}
+
+/**
+ * Wilson score lower bound (95% confidence) with optional Bayesian prior.
+ *
+ * Use this to RANK brawlers on a map, not to display their win rate.
+ * It answers "what's the lowest plausible true win rate given this many
+ * games?" — so 2/2 (100% raw) gets pulled down hard while 700/1000
+ * (70% raw) stays close to its observed rate.
+ *
+ * `priorGames` adds that many virtual 50/50 games before computing, which
+ * shrinks tiny samples toward the population mean. Without a prior, a 5-0
+ * record Wilson-scores higher than a 44-33 record (statistically defensible
+ * but unintuitive). With priorGames=50, the 5-0 becomes effectively 30-25
+ * and sinks to where a reasonable viewer expects it to be.
+ *
+ * Reddit uses the same Wilson formula (without a prior) to rank comments.
+ *
+ * Returns 0..1. Multiply by 100 for a percentage.
+ */
+export function wilsonScoreLowerBound(
+  wins: number,
+  total: number,
+  priorGames = 0
+): number {
+  const w = wins + priorGames / 2;
+  const n = total + priorGames;
+  if (n === 0) return 0;
+  const z = 1.96; // 95% confidence
+  const p = w / n;
+  const z2 = z * z;
+  const numerator =
+    p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+  const denominator = 1 + z2 / n;
+  return numerator / denominator;
 }

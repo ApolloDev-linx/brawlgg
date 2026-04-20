@@ -7,6 +7,7 @@ import {
   CLASS_TO_ROLE,
   BRAWLER_TYPE_OVERRIDES,
 } from "@/lib/constants";
+import { toBrawlerName } from "@/lib/brawler-name";
 import type { BrawlerType } from "@/types/brawler";
 
 interface NormalizedBrawler {
@@ -18,38 +19,8 @@ interface NormalizedBrawler {
   externalId: number;
 }
 
-/**
- * Normalize any casing/separators from the API to canonical title case.
- * Handles: "BULL" -> "Bull", "el primo" -> "El Primo",
- *          "EL-PRIMO" -> "El Primo", "LARRY-LAWRIE" -> "Larry & Lawrie",
- *          "MR-P" -> "Mr. P"
- */
-function toTitleCase(str: string): string {
-  // Explicit canonicalizations for brawlers the API serves with weird slugs.
-  // These take priority over the generic hyphen/underscore handling below.
-  const CANONICAL: Record<string, string> = {
-    "larry-lawrie": "Larry & Lawrie",
-    "larry and lawrie": "Larry & Lawrie",
-    "mr-p": "Mr. P",
-    "mr p": "Mr. P",
-    "el-primo": "El Primo",
-    // Keep legitimate hyphens:
-    "8-bit": "8-Bit",
-    "r-t": "R-T",
-    "jae-yong": "Jae-Yong",
-  };
-
-  const lower = str.toLowerCase().trim();
-  if (CANONICAL[lower]) return CANONICAL[lower];
-
-  // Default path: convert hyphens/underscores to spaces, then title-case.
-  return lower
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
-  const name = toTitleCase(raw.name);
+  const name = toBrawlerName(raw.name);
   const className = (raw.class?.name || "").toLowerCase();
 
   // 1. Authoritative: hand-curated overrides win, always.
@@ -69,7 +40,6 @@ function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
   //    mapping, but LOUDLY log so we know to add them to BRAWLER_TYPE_OVERRIDES.
   const mappedType = CLASS_TO_TYPE[className];
   const mappedRole = CLASS_TO_ROLE[className];
-
   if (!mappedType) {
     console.warn(
       `[brawler-sync] UNCLASSIFIED: "${name}" (API class="${raw.class?.name}"). ` +
@@ -80,7 +50,6 @@ function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
       `[brawler-sync] New brawler "${name}" auto-classified as ${mappedRole}/${mappedType} from API class "${raw.class?.name}". Verify and add to BRAWLER_TYPE_OVERRIDES.`
     );
   }
-
   return {
     name,
     role: mappedRole || "Damage",
@@ -128,7 +97,6 @@ export async function syncBrawlerData(
     updated: 0,
     errors: [],
   };
-
   let rawBrawlers: BrawlifyBrawler[] = [];
   try {
     rawBrawlers = await fetchBrawlers();
@@ -145,17 +113,23 @@ export async function syncBrawlerData(
       imageUrl2: "",
     })) as BrawlifyBrawler[];
   }
-
   const normalized = rawBrawlers.map(normalizeBrawler);
   result.total = normalized.length;
 
   for (const b of normalized) {
     try {
-      const existing = await prisma.brawler.findUnique({ where: { name: b.name } });
+      // Case-insensitive lookup so we never create a duplicate row even if
+      // the API ever returns "COLT" and our normalizer somehow misses it.
+      // If an existing row has bad casing ("COLT"), we also auto-heal its
+      // name to the canonical title-case version on update.
+      const existing = await prisma.brawler.findFirst({
+        where: { name: { equals: b.name, mode: "insensitive" } },
+      });
       if (existing) {
         await prisma.brawler.update({
           where: { id: existing.id },
           data: {
+            name: b.name, // auto-heal "COLT" -> "Colt" if any leftover bad casing
             role: b.role,
             type: b.type,
             hp: b.hp,
@@ -181,7 +155,6 @@ export async function syncBrawlerData(
       result.errors.push(`${b.name}: ${(e as Error).message}`);
     }
   }
-
   return result;
 }
 
@@ -189,7 +162,6 @@ import { getTier } from "@/lib/constants";
 
 // Counter matchups
 // ---------------------------------------------------------------------------
-
 export interface MatchupSyncResult {
   total: number;
   errors: string[];
@@ -212,7 +184,6 @@ function computeMatchupScore(
 ): { score: number; reason: string } {
   const info = COUNTER_MATRIX[attackerType];
   const rand = stableRand(`${attackerName}|${defenderName}`);
-
   if (info?.strongVs.includes(defenderType)) {
     return {
       score: Math.round((1.5 + rand) * 10) / 10,
@@ -236,7 +207,6 @@ export async function syncCounterMatchups(
 ): Promise<MatchupSyncResult> {
   const result: MatchupSyncResult = { total: 0, errors: [] };
   const brawlers = await prisma.brawler.findMany();
-
   for (const attacker of brawlers) {
     for (const defender of brawlers) {
       if (attacker.id === defender.id) continue;
@@ -273,11 +243,9 @@ export async function syncCounterMatchups(
   return result;
 }
 
-
 // Map brawler stats (placeholder rows for brawlers missing one on each map;
 // real rates get filled in later by stat-aggregator.)
 // ---------------------------------------------------------------------------
-
 export async function syncMapBrawlerStats(
   prisma: PrismaClient
 ): Promise<number> {
@@ -285,7 +253,6 @@ export async function syncMapBrawlerStats(
     prisma.brawler.findMany(),
     prisma.map.findMany({ where: { active: true } }),
   ]);
-
   let created = 0;
   for (const map of maps) {
     for (const brawler of brawlers) {
@@ -295,12 +262,10 @@ export async function syncMapBrawlerStats(
         },
       });
       if (existing) continue; // don't clobber real aggregated data
-
       const rand = stableRand(`${map.id}|${brawler.id}`);
       const winRate = 45 + rand * 10;
       const pickRate = rand * 15;
       const banRate = rand * 5;
-
       try {
         await prisma.mapBrawlerStat.create({
           data: {
