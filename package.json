@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
+    "@vercel/analytics": "^2.0.1",
     "dotenv": "^17.4.2",
     "framer-motion": "^11.2.0",
     "geist": "^1.7.0",

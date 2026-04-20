@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
@@ -21,7 +22,10 @@ export default function RootLayout({
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased min-h-screen`}
       >
         <Navigation />
-        <main className="max-w-5xl mx-auto px-4 pb-16">{children}</main>
+        <main className="max-w-5xl mx-auto px-4 pb-16">{children}
+
+	</main>
+	<Analytics />
       </body>
     </html>
   );
