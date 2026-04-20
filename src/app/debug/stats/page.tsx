@@ -203,6 +203,11 @@ async function getVerificationData() {
       ? Math.round((totalMapAggSamples / totalBattles) * 1000) / 10
       : 0;
 
+  // Battles in tracked modes that aren't tied to a known map row.
+  // Under the new architecture these DO count toward brawler-level stats
+  // via BrawlerStat — they're only excluded from the per-map page.
+  const mapPageOnlyExcluded = trackedBattles - totalMapAggSamples;
+
   const realStatRows = await prisma.mapBrawlerStat.count({
     where: { isReal: true },
   });
@@ -226,6 +231,7 @@ async function getVerificationData() {
       totalBattles,
       trackedBattles,
       excludedByMode,
+      mapPageOnlyExcluded,
       totalStoredBattles,
       storedCapturedPercent,
       totalMapAggSamples,
@@ -268,6 +274,14 @@ function statusBadge(status: Row["status"], delta: number | null) {
 export default async function DebugStatsPage() {
   const { rows, totals } = await getVerificationData();
 
+  // Healthy-rows tile color — green if everything's clean, yellow on any
+  // stat-drift or ingestion-gap. "No data" rows don't affect health.
+  const hasIssues = totals.driftRows > 0 || totals.gapRows > 0;
+
+  // Denominator excludes "no data" brawlers so the ratio reads naturally
+  // (101/101 instead of 101/102 when one brawler simply has no battles yet).
+  const ratableBrawlers = totals.totalBrawlers - totals.noDataRows;
+
   const formatTimestamp = (d: Date | null) =>
     d ? d.toISOString().replace("T", " ").slice(0, 19) + " UTC" : "never";
 
@@ -285,79 +299,100 @@ export default async function DebugStatsPage() {
           href="/debug/maps"
           className="text-xs text-text-secondary hover:text-text-primary border border-border rounded-md px-3 py-1.5 whitespace-nowrap"
         >
-          Map ingestion →
+          Inspect maps →
         </Link>
       </div>
 
-      {/* Summary tiles */}
+      {/* Summary tiles — original four-tile layout. "Counted in meta" is
+          now 100% (vs 83.7% under the old MapBrawlerStat-only path) because
+          BrawlerStat ignores the map filter. "Excluded" only counts the
+          truly excluded battles (non-competitive modes); the ~30k
+          tracked-but-unmapped battles still count toward meta — they only
+          drop out of /maps. See the blue box below for the full breakdown. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">Healthy rows</div>
-          <div className="text-xl font-medium" style={{ color: "#5DCAA5" }}>
-            {totals.healthyRows}
+          <div className="text-xs text-text-secondary mb-1">Total battles</div>
+          <div className="text-xl font-medium">
+            {totals.totalBattles.toLocaleString()}
           </div>
           <div className="text-[11px] text-text-tertiary">
-            of {totals.totalBrawlers} brawlers
+            raw in BattleRecord
           </div>
         </div>
         <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">Drift rows</div>
+          <div className="text-xs text-text-secondary mb-1">
+            Counted in meta
+          </div>
           <div
             className="text-xl font-medium"
-            style={{ color: totals.driftRows > 0 ? "#ED93B1" : "#5DCAA5" }}
+            style={{ color: "#5DCAA5" }}
           >
-            {totals.driftRows}
+            {totals.totalStoredBattles.toLocaleString()}
           </div>
           <div className="text-[11px] text-text-tertiary">
-            BrawlerStat ≠ Raw
+            {totals.storedCapturedPercent}% of total
           </div>
         </div>
         <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">Ingestion gaps</div>
+          <div className="text-xs text-text-secondary mb-1">Excluded</div>
+          <div className="text-xl font-medium" style={{ color: "#FAC775" }}>
+            {totals.excludedByMode.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-tertiary">
+            Showdown, 5v5, novelty
+          </div>
+        </div>
+        <div className="bg-bg-secondary rounded-lg p-4">
+          <div className="text-xs text-text-secondary mb-1">Winrate match</div>
           <div
             className="text-xl font-medium"
-            style={{ color: totals.gapRows > 0 ? "#F09595" : "#5DCAA5" }}
+            style={{ color: hasIssues ? "#FAC775" : "#5DCAA5" }}
           >
-            {totals.gapRows}
+            {totals.healthyRows}/{ratableBrawlers}
           </div>
           <div className="text-[11px] text-text-tertiary">
-            raw battles, no stat row
-          </div>
-        </div>
-        <div className="bg-bg-secondary rounded-lg p-4">
-          <div className="text-xs text-text-secondary mb-1">No data</div>
-          <div className="text-xl font-medium text-text-secondary">
-            {totals.noDataRows}
-          </div>
-          <div className="text-[11px] text-text-tertiary">
-            unobserved brawlers
+            raw ≈ stored
           </div>
         </div>
       </div>
 
-      {/* Coverage explainer */}
-      <div className="bg-bg-secondary rounded-lg p-4 mb-6 text-xs text-text-secondary space-y-2">
-        <div>
-          <strong>{totals.totalBattles.toLocaleString()}</strong> total battles
-          in BattleRecord. <strong>{totals.excludedByMode.toLocaleString()}</strong>{" "}
-          excluded by mode (Showdown, 5v5, novelty), leaving{" "}
-          <strong>{totals.trackedBattles.toLocaleString()}</strong> in tracked
-          competitive modes.
+      {/* Blue explainer box — preserved from original design.
+          Header reframed for the new architecture: meta now captures
+          everything tracked, the only true exclusion is non-competitive
+          modes. The 30k by-map number still lives here for transparency
+          but is clearly labeled as map-page-only, not a meta exclusion. */}
+      <div
+        className="mb-6 p-4 rounded-lg border"
+        style={{
+          background: "rgba(133, 183, 235, 0.06)",
+          borderColor: "rgba(133, 183, 235, 0.2)",
+        }}
+      >
+        <div className="text-sm font-medium mb-2" style={{ color: "#85B7EB" }}>
+          What's excluded from meta stats — and why
         </div>
-        <div>
-          <strong>BrawlerStat captures{" "}
-            {totals.totalStoredBattles.toLocaleString()}</strong>{" "}
-          of those ({totals.storedCapturedPercent}% of all battles) — every
-          tracked-mode battle counts, no map filter applied. This is what
-          the dashboard, counter, draft, and analyzer pages now read from.
-        </div>
-        <div>
-          <strong>Map-aggregated</strong> only captures{" "}
-          {totals.totalMapAggSamples.toLocaleString()} (
-          {totals.mapAggCapturedPercent}% of all battles) — the gap is the
-          ~18% of tracked battles on maps that aren't in our Map table.
-          Used to power the per-map page; the Map-Agg WR column below shows
-          how much each brawler's number was being skewed by that filter.
+        <div className="text-xs text-text-secondary space-y-1">
+          <div>
+            <strong>{totals.excludedByMode.toLocaleString()}</strong> battles
+            excluded by mode — not in the 9 tracked competitive modes (Gem
+            Grab, Brawl Ball, Bounty, Heist, Hot Zone, Knockout, Siege,
+            Wipeout, Duels). Showdown, 5v5 events, and novelty modes stay
+            in BattleRecord as raw data but don't count toward meta stats.
+          </div>
+          <div>
+            An additional{" "}
+            <strong>{totals.mapPageOnlyExcluded.toLocaleString()}</strong>{" "}
+            tracked-mode battles aren't tied to a known map row — mostly
+            5v5 Brawl Ball events the API tags as "brawlBall" with no clean
+            3v3/5v5 distinction, plus retired Siege maps and long-tail maps
+            Brawlify lists under different names. These DO count toward
+            brawler-level meta stats via BrawlerStat; they're only excluded
+            from the per-map rankings on /maps.
+          </div>
+          <div className="pt-1 text-text-tertiary">
+            Intentional — we track classic 3v3 ranked competitive. Raw
+            battles stay in BattleRecord for transparency and forkability.
+          </div>
         </div>
       </div>
 
