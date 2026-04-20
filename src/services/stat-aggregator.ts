@@ -2,10 +2,20 @@
  * stat-aggregator.ts
  *
  * Reads raw BattleRecord data and computes real win/pick/ban rates,
- * then updates MapBrawlerStat. Rows with enough real data (MIN_SAMPLE)
- * are marked isReal=true and replace simulated stats.
+ * then updates two tables:
  *
- * Called by the aggregate cron job.
+ *   1. MapBrawlerStat — per-map win/pick rates (one row per map×brawler).
+ *      Powers the map meta page. Subject to map-filtering: battles whose
+ *      mapName isn't in our Map table get dropped here.
+ *
+ *   2. BrawlerStat — overall win/pick rates per brawler (one row per
+ *      brawler). Powers the dashboard / counter / draft / analyzer.
+ *      Computed from raw BattleRecord with NO map filter, so the totals
+ *      include battles on tracked-mode maps not in our Map table — fixes
+ *      the dashboard bias where map-averaged WRs misrepresented brawlers
+ *      with skewed performance on unmapped maps.
+ *
+ * Called by the aggregate cron job and by scripts/pipeline.ts.
  *
  * Philosophy:
  *   - BattleRecord is a raw log. The harvester stores whatever it ingests.
@@ -28,7 +38,8 @@
  *   mode-level way to distinguish them. We handle this by relying on the
  *   Map table — 5v5 event maps aren't in our Map table (map-sync filters
  *   them out), so those battles naturally don't match any map row and
- *   get excluded. We track them in excludedByMap for transparency.
+ *   get excluded from per-map stats. They DO still count toward overall
+ *   BrawlerStat totals though, since the brawler still played them.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -104,7 +115,6 @@ export async function aggregateStats(): Promise<AggregationResult> {
       result: true,
     },
   });
-
   result.totalBattles = battles.length;
   if (battles.length === 0) return result;
 
@@ -113,7 +123,7 @@ export async function aggregateStats(): Promise<AggregationResult> {
 
   // Group: mapName → brawlerName → { wins, total, brawlerId }
   // Only includes battles whose gameMode is in TRACKED_MODES.
-  const grouped: Record<
+  const grouped: Record <
     string,
     Record<string, { wins: number; total: number; brawlerId: string | null }>
   > = {};
@@ -240,5 +250,116 @@ export async function aggregateStats(): Promise<AggregationResult> {
   }
 
   result.mapsProcessed = processedMaps.size;
+
+  // Compute brawler-level totals from raw BattleRecord (no map filtering).
+  // Powers the dashboard, counter, draft, and analyzer pages — separate
+  // from the per-map MapBrawlerStat work above. Cheap (~1-2s).
+  await computeBrawlerStats();
+
   return result;
+}
+
+/**
+ * Compute brawler-level totals directly from BattleRecord.
+ *
+ * Why this exists separately from per-map aggregation:
+ *   - Per-map (MapBrawlerStat) drops battles whose mapName isn't in
+ *     our Map table — currently ~18% of data
+ *   - Averaging MapBrawlerStat rows weighted by sampleSize then INHERITS
+ *     that bias, so a brawler that performs differently on
+ *     unmapped-but-tracked maps shows up wrong on the dashboard
+ *   - This function pools EVERY tracked-mode battle, no map filtering,
+ *     so the dashboard / counter / draft / analyzer see honest numbers
+ *
+ * Run after the per-map aggregation in the same pass.
+ */
+export async function computeBrawlerStats(): Promise<{
+  brawlersUpdated: number;
+  realStatsCount: number;
+}> {
+  const battlesByBrawler = await prisma.battleRecord.groupBy({
+    by: ["brawlerName"],
+    _count: { _all: true },
+    where: { gameMode: { in: Array.from(TRACKED_MODES) } },
+  });
+
+  const winsByBrawler = await prisma.battleRecord.groupBy({
+    by: ["brawlerName"],
+    _count: { _all: true },
+    where: {
+      gameMode: { in: Array.from(TRACKED_MODES) },
+      result: "victory",
+    },
+  });
+
+  const totalsByName = new Map<string, { battles: number; wins: number }>();
+  for (const r of battlesByBrawler) {
+    totalsByName.set(r.brawlerName, { battles: r._count._all, wins: 0 });
+  }
+  for (const r of winsByBrawler) {
+    const existing = totalsByName.get(r.brawlerName);
+    if (existing) existing.wins = r._count._all;
+  }
+
+  // Total tracked-mode battles across all brawlers — denominator for pickRate
+  const totalTrackedBattles = Array.from(totalsByName.values()).reduce(
+    (s, v) => s + v.battles,
+    0
+  );
+
+  const brawlers = await prisma.brawler.findMany({
+    select: { id: true, name: true },
+  });
+
+  // Lookup by lowercased name (the canonicalization layer means brawlerName
+  // in BattleRecord and name in Brawler should agree case-insensitively).
+  const battleByLowerName = new Map<string, { battles: number; wins: number }>();
+  for (const [name, totals] of totalsByName) {
+    battleByLowerName.set(name.toLowerCase(), totals);
+  }
+
+  let brawlersUpdated = 0;
+  let realStatsCount = 0;
+
+  for (const b of brawlers) {
+    const totals = battleByLowerName.get(b.name.toLowerCase()) ?? {
+      battles: 0,
+      wins: 0,
+    };
+    const winRate =
+      totals.battles > 0
+        ? Math.round((totals.wins / totals.battles) * 1000) / 10
+        : 50;
+    const pickRate =
+      totalTrackedBattles > 0
+        ? Math.round((totals.battles / totalTrackedBattles) * 1000) / 10
+        : 0;
+    const isReal = totals.battles >= MIN_SAMPLE;
+    if (isReal) realStatsCount++;
+
+    await prisma.brawlerStat.upsert({
+      where: { brawlerId: b.id },
+      update: {
+        totalBattles: totals.battles,
+        totalWins: totals.wins,
+        winRate,
+        pickRate,
+        banRate: 0, // placeholder until we add real ban data
+        isReal,
+        computedAt: new Date(),
+      },
+      create: {
+        brawlerId: b.id,
+        totalBattles: totals.battles,
+        totalWins: totals.wins,
+        winRate,
+        pickRate,
+        banRate: 0,
+        isReal,
+      },
+    });
+    brawlersUpdated++;
+  }
+
+  return { brawlersUpdated, realStatsCount };
 }

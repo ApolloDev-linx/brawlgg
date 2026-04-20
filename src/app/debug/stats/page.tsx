@@ -3,15 +3,20 @@
  *
  * Self-consistency check. For every brawler, shows three independent numbers:
  *
- *   1. RAW        — computed from BattleRecord (filtered to tracked modes)
- *   2. AGGREGATED — sum of MapBrawlerStat rows weighted by sampleSize
- *   3. HOMEPAGE   — what aggregateBrawlerStats() returns (what users see)
+ *   1. RAW        — computed directly from BattleRecord (tracked modes only)
+ *   2. AGGREGATED — sum of MapBrawlerStat rows weighted by sampleSize.
+ *                   Computed with prior=0 so it should equal RAW within ±1pp.
+ *                   Drift here = real bug in the aggregation pipeline.
+ *   3. HOMEPAGE   — what aggregateBrawlerStats() returns by default
+ *                   (with prior=50). This is what users see on /, /counter,
+ *                   /draft, /analyzer. Will differ from RAW for low-sample
+ *                   brawlers — that's the prior shrinking them toward 50%,
+ *                   not a bug.
  *
  * Health definition:
- *   A row is "healthy" if the RAW and AGGREGATED winrates agree within 1pp.
- *   Sample-size differences (e.g. 5v5 battles intentionally excluded) don't
- *   make a row unhealthy — what matters is whether the brawler's winrate
- *   on the maps we DO track matches what the aggregator produced.
+ *   A row is "healthy" if RAW and AGGREGATED agree within 1pp. The HOMEPAGE
+ *   column is informational — gap between AGGREGATED and HOMEPAGE shows how
+ *   much the Bayesian prior is moving the displayed number.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -40,7 +45,8 @@ interface Row {
   rawBattles: number;
   rawWins: number;
   rawWinRate: number | null;
-  aggregatedWinRate: number;
+  aggregatedWinRate: number;       // prior=0, should match RAW
+  homepageWinRate: number;         // prior=50, what users see
   aggregatedSampleSize: number;
   status: "ok" | "winrate-drift" | "ingestion-gap" | "no-data";
   delta: number | null;
@@ -83,7 +89,14 @@ async function getVerificationData() {
         ? Math.round((rawWinsCount / rawBattlesCount) * 1000) / 10
         : null;
 
-    const agg = aggregateBrawlerStats(b.mapStats);
+    // prior=0 → unshrunk weighted average. This is the value we compare
+    // against raw to detect aggregation bugs. Should match raw within ±1pp.
+    const agg = aggregateBrawlerStats(b.mapStats, 0);
+
+    // prior=50 → what /, /counter, /draft, /analyzer actually display.
+    // Differs from `agg` for low-sample brawlers (the prior pulls them
+    // toward 50%). Shown for transparency, NOT used for drift detection.
+    const homepage = aggregateBrawlerStats(b.mapStats);
 
     const dropPercent =
       rawBattlesCount > 0
@@ -94,7 +107,6 @@ async function getVerificationData() {
 
     let status: Row["status"];
     let delta: number | null = null;
-
     if (rawBattlesCount === 0 && agg.sampleSize === 0) {
       status = "no-data";
     } else if (rawBattlesCount > 0 && agg.sampleSize === 0) {
@@ -113,6 +125,7 @@ async function getVerificationData() {
       rawWins: rawWinsCount,
       rawWinRate,
       aggregatedWinRate: agg.winRate,
+      homepageWinRate: homepage.winRate,
       aggregatedSampleSize: agg.sampleSize,
       status,
       delta,
@@ -127,7 +140,6 @@ async function getVerificationData() {
     where: { gameMode: { in: TRACKED_MODES } },
   });
   const excludedByMode = totalBattles - trackedBattles;
-
   const totalAggregatedSamples = rows.reduce(
     (s, r) => s + r.aggregatedSampleSize,
     0
@@ -137,7 +149,6 @@ async function getVerificationData() {
   const realStatRows = await prisma.mapBrawlerStat.count({
     where: { isReal: true },
   });
-
   const latestAgg = await prisma.mapBrawlerStat.findFirst({
     orderBy: { computedAt: "desc" },
     select: { computedAt: true },
@@ -200,7 +211,6 @@ function statusBadge(
 
 export default async function DebugStatsPage() {
   const { rows, totals } = await getVerificationData();
-
   const excludedPercent =
     totals.totalBattles > 0
       ? Math.round(
@@ -318,6 +328,12 @@ export default async function DebugStatsPage() {
               <th className="text-right px-3 py-2 font-medium">
                 Aggregated (n)
               </th>
+              <th
+                className="text-right px-3 py-2 font-medium"
+                title="What users see on /, /counter, /draft, /analyzer (prior=50)"
+              >
+                Homepage WR
+              </th>
               <th className="text-right px-3 py-2 font-medium">Delta</th>
             </tr>
           </thead>
@@ -352,6 +368,9 @@ export default async function DebugStatsPage() {
                     ? `${r.aggregatedWinRate}% (${r.aggregatedSampleSize})`
                     : `${r.aggregatedWinRate}% (seed)`}
                 </td>
+                <td className="px-3 py-2 text-right font-mono text-text-tertiary">
+                  {r.homepageWinRate}%
+                </td>
                 <td className="px-3 py-2 text-right">
                   {statusBadge(r.status, r.delta, r.dropPercent)}
                 </td>
@@ -373,6 +392,13 @@ export default async function DebugStatsPage() {
         <div>
           <span style={{ color: "#F09595" }}>⚠ all dropped</span> — aggregator
           saw zero battles despite raw data. Brawler name mismatch.
+        </div>
+        <div className="pt-2 text-text-tertiary">
+          <strong>Aggregated</strong> uses prior=0 (raw weighted average) and
+          is what we compare against Raw to detect bugs.{" "}
+          <strong>Homepage WR</strong> uses prior=50 (Bayesian shrinkage) and
+          is what users actually see — it'll be pulled toward 50% for
+          low-sample brawlers, which is intentional, not a bug.
         </div>
       </div>
     </div>

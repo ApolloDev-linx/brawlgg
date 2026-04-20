@@ -36,21 +36,50 @@ export interface AggregatedStats {
 
 /**
  * Pool a list of per-map stat rows into a single weighted average.
+ *
+ * `priorGames` adds N virtual 50/50 games to the brawler's total before
+ * computing the win rate. This shrinks tiny-sample brawlers toward 50%
+ * so a brand-new brawler with 3-0 doesn't show up on dashboard
+ * leaderboards as "100% win rate." Matches what `wilsonScoreLowerBound`
+ * uses on the map page (default 50) for consistent behavior across
+ * the app.
+ *
+ * Pick rate and ban rate are not shrunk — those are pure ratios over
+ * total picks/bans, where small samples don't produce misleading
+ * outliers the same way win rate does.
+ *
+ * Pass `priorGames = 0` to get the unshrunk weighted average. Use this
+ * for verification/debug pages where you're comparing to raw SQL.
+ *
  * Results are rounded to one decimal place for display.
  */
-export function aggregateBrawlerStats(stats: WeightedStat[]): AggregatedStats {
+export function aggregateBrawlerStats(
+  stats: WeightedStat[],
+  priorGames = 50
+): AggregatedStats {
   const totalSamples = stats.reduce((s, st) => s + st.sampleSize, 0);
+
   if (totalSamples === 0) {
     return { winRate: 50, pickRate: 0, banRate: 0, sampleSize: 0 };
   }
-  const winRate =
+
+  // Weighted-average win rate from real data, then shrink toward 50%
+  // using the Bayesian prior. Equivalent to:
+  //   adjusted = (realWins + prior/2) / (realGames + prior)
+  const observedWinRate =
     stats.reduce((s, st) => s + st.winRate * st.sampleSize, 0) / totalSamples;
+
+  const observedWins = (observedWinRate / 100) * totalSamples;
+  const adjustedWinRate =
+    ((observedWins + priorGames / 2) / (totalSamples + priorGames)) * 100;
+
   const pickRate =
     stats.reduce((s, st) => s + st.pickRate * st.sampleSize, 0) / totalSamples;
   const banRate =
     stats.reduce((s, st) => s + st.banRate * st.sampleSize, 0) / totalSamples;
+
   return {
-    winRate: Math.round(winRate * 10) / 10,
+    winRate: Math.round(adjustedWinRate * 10) / 10,
     pickRate: Math.round(pickRate * 10) / 10,
     banRate: Math.round(banRate * 10) / 10,
     sampleSize: totalSamples,

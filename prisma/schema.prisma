@@ -25,6 +25,7 @@ model Brawler {
   metaSnapshots  MetaSnapshot[]
   playerBrawlers PlayerBrawler[]
   battleRecords  BattleRecord[]
+  stat           BrawlerStat?
 
   @@index([type])
   @@index([name])
@@ -69,6 +70,31 @@ model MapBrawlerStat {
   @@unique([mapId, brawlerId])
   @@index([mapId])
   @@index([brawlerId])
+}
+
+// Brawler-level totals computed directly from BattleRecord (NOT averaged
+// from MapBrawlerStat). Avoids the map-filtering bias where battles on
+// maps not in our Map table get dropped from per-map aggregation.
+//
+// Read by the dashboard, counter picker, draft simulator, and analyzer
+// via src/lib/brawler-stats-reader.ts. Populated by computeBrawlerStats()
+// in src/services/stat-aggregator.ts on every aggregation run.
+model BrawlerStat {
+  id           String   @id @default(uuid())
+  brawlerId    String   @unique
+  brawler      Brawler  @relation(fields: [brawlerId], references: [id], onDelete: Cascade)
+
+  totalBattles Int      @default(0)
+  totalWins    Int      @default(0)
+  winRate      Float    @default(50)
+  pickRate     Float    @default(0)
+  banRate      Float    @default(0)
+
+  isReal       Boolean  @default(false)
+  computedAt   DateTime @default(now())
+
+  @@index([winRate])
+  @@index([totalBattles])
 }
 
 model CounterMatchup {
