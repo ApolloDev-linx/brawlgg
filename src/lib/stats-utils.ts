@@ -134,6 +134,44 @@ export function wilsonScoreLowerBound(
 }
 
 // ---------------------------------------------------------------------------
+// Sample-aware tier assignment
+// ---------------------------------------------------------------------------
+//
+// The plain getTier() in constants.ts only looks at winRate. That's fine
+// for big-sample brawlers (Mortis at 10k+ battles) but it happily assigns
+// S to any small-sample brawler that crossed 54% — Jae-Yong on 518 battles
+// at 54.6% WR gets the same S badge as Mandy on 2,400+ battles at 54.1%.
+// That's a trust problem: a badge that loud should mean "confidently meta-
+// defining," not "happened to sneak above a threshold on thin data."
+//
+// Rule: S tier requires a real signal AND a large sample.
+//   - winRate ≥ 54
+//   - totalBattles ≥ MIN_BATTLES_FOR_S (1000)
+// Below that, cap at A even if WR is S-worthy. Prior shrinkage already
+// nudges small samples toward 50%, but it isn't strong enough on its own
+// to protect the S badge from outliers with a few hundred battles.
+//
+// A, B, C tiers use the same thresholds as getTier() — no cap there; the
+// lower bands are less load-bearing as a trust signal and the prior's
+// shrinkage handles them fine.
+export const MIN_BATTLES_FOR_S = 1000;
+
+/**
+ * Like getTier(winRate) from constants.ts, but aware of sample size so
+ * low-confidence brawlers can't claim S.
+ *
+ * Use this wherever a tier badge is displayed to a user. Keep the old
+ * getTier() for places where we only have a winRate and sample is already
+ * guaranteed (e.g. per-map stats where the Wilson sort handles it).
+ */
+export function safeTier(winRate: number, totalBattles: number): string {
+  if (winRate >= 54 && totalBattles >= MIN_BATTLES_FOR_S) return "S";
+  if (winRate >= 51) return "A";
+  if (winRate >= 48) return "B";
+  return "C";
+}
+
+// ---------------------------------------------------------------------------
 // Map-detail pick selectors
 // ---------------------------------------------------------------------------
 //

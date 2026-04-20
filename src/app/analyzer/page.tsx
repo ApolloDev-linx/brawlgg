@@ -1,10 +1,11 @@
 import { cached } from "@/lib/redis";
-import { CACHE_TTL, getTier, TYPE_COLORS, TYPE_LABELS, TIER_COLORS, COUNTER_MATRIX } from "@/lib/constants";
+import { CACHE_TTL, TYPE_COLORS, TYPE_LABELS, TIER_COLORS, COUNTER_MATRIX } from "@/lib/constants";
+import { safeTier } from "@/lib/stats-utils";
 import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import { AnalyzerClient } from "@/components/dashboard/AnalyzerClient";
 
 async function getAnalyzerData() {
-  return cached("analyzer:data", CACHE_TTL.META, async () => {
+  return cached("analyzer:data:v2", CACHE_TTL.META, async () => {
     // Reads from BrawlerStat (computed from raw BattleRecord), not from
     // averaging MapBrawlerStat. Avoids the map-filtering bias that was
     // tilting type/tier distributions and brawler deep-dive numbers.
@@ -18,8 +19,9 @@ async function getAnalyzerData() {
       hp: b.hp,
       winRate: b.winRate,
       pickRate: b.pickRate,
-      banRate: b.banRate,
-      tier: getTier(b.winRate),
+      // safeTier: kept in lockstep with the other pages so the tier
+      // distribution chart shows a consistent view of S/A/B/C counts.
+      tier: safeTier(b.winRate, b.totalBattles),
     }));
   });
 }

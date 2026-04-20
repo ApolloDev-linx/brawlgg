@@ -12,7 +12,6 @@ interface BrawlerData {
   hp: number;
   winRate: number;
   pickRate: number;
-  banRate: number;
   tier: string;
 }
 
@@ -170,8 +169,10 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
               </div>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            {/* Stats — Ban rate card removed. We have no real ban data
+                from the API, so it was always showing 0%. Grid collapsed
+                from 3 cols to 2. */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-bg-secondary rounded-lg p-3">
                 <div className="text-[11px] text-text-secondary">Win rate</div>
                 <div
@@ -191,17 +192,6 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
               <div className="bg-bg-secondary rounded-lg p-3">
                 <div className="text-[11px] text-text-secondary">Pick rate</div>
                 <div className="text-lg font-medium">{selected.pickRate}%</div>
-              </div>
-              <div className="bg-bg-secondary rounded-lg p-3">
-                <div className="text-[11px] text-text-secondary">Ban rate</div>
-                <div
-                  className="text-lg font-medium"
-                  style={{
-                    color: selected.banRate > 5 ? "#ED93B1" : undefined,
-                  }}
-                >
-                  {selected.banRate}%
-                </div>
               </div>
             </div>
 

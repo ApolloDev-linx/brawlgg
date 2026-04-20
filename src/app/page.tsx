@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, TIER_COLORS, TYPE_COLORS, TYPE_LABELS } from "@/lib/constants";
-import { getTier } from "@/lib/constants";
+import { safeTier } from "@/lib/stats-utils";
 import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import Link from "next/link";
 
@@ -14,13 +14,14 @@ interface BrawlerSummary {
   role: string;
   winRate: number;
   pickRate: number;
-  banRate: number;
   tier: string;
+  totalBattles: number;
+  isReal: boolean;
   impact: number; // winRate × pickRate — meta dominance score
 }
 
 async function getDashboardData() {
-  return cached("dashboard:overview", CACHE_TTL.META, async () => {
+  return cached("dashboard:overview:v2", CACHE_TTL.META, async () => {
     // Reads from BrawlerStat (computed from raw BattleRecord), not from
     // averaging MapBrawlerStat. This is what fixes Lou/Sam looking like
     // top-3 — they were artifacts of map-filtering bias.
@@ -33,8 +34,12 @@ async function getDashboardData() {
       role: b.role,
       winRate: b.winRate,
       pickRate: b.pickRate,
-      banRate: b.banRate,
-      tier: getTier(b.winRate),
+      // safeTier: S requires both winRate ≥ 54 AND ≥1000 battles. Stops
+      // small-sample brawlers from inheriting the loudest badge on thin
+      // data. See stats-utils.ts for rationale.
+      tier: safeTier(b.winRate, b.totalBattles),
+      totalBattles: b.totalBattles,
+      isReal: b.isReal,
       // Impact = how much this brawler shapes competitive play.
       // A 56% WR brawler with 0.3% pick rate is statistically strong but
       // basically invisible in real games. A 53% WR brawler with 5% pick
@@ -64,12 +69,23 @@ export default async function DashboardPage() {
   // "which brawler has the highest raw WR" (which favors niche picks).
   const topMeta = [...summaries].sort((a, b) => b.impact - a.impact).slice(0, 8);
   const topPicked = [...summaries].sort((a, b) => b.pickRate - a.pickRate).slice(0, 5);
-  const topBanned = [...summaries].sort((a, b) => b.banRate - a.banRate).slice(0, 5);
+
+  // Highest win rate replaces the old "Most banned" card. Filters to real-
+  // sample brawlers so the list can't be topped by a 2-0 statistical mirage.
+  const topWinRate = [...summaries]
+    .filter((b) => b.isReal)
+    .sort((a, b) => b.winRate - a.winRate)
+    .slice(0, 5);
 
   const avgWin = summaries.length > 0
     ? Math.round((summaries.reduce((s, b) => s + b.winRate, 0) / summaries.length) * 10) / 10
     : 0;
-  const mostBanned = topBanned[0];
+
+  // Top meta brawler fills what used to be the "Most banned" tile. We have
+  // no real ban data from the API, so the old tile was always showing
+  // "8-Bit · 0% ban rate" or similar — a broken signal. This replaces it
+  // with a real insight: who's actually dominating competitive play.
+  const topMetaBrawler = topMeta[0];
 
   return (
     <div>
@@ -104,12 +120,12 @@ export default async function DashboardPage() {
               </div>
             </div>
             <div className="bg-bg-secondary rounded-lg p-4">
-              <div className="text-xs text-text-secondary mb-1">Most banned</div>
-              <div className="text-xl font-medium" style={{ color: "#ED93B1" }}>
-                {mostBanned?.name || "N/A"}
+              <div className="text-xs text-text-secondary mb-1">Top meta brawler</div>
+              <div className="text-xl font-medium" style={{ color: "#EF9F27" }}>
+                {topMetaBrawler?.name || "N/A"}
               </div>
               <div className="text-[11px] text-text-tertiary">
-                {mostBanned ? `${mostBanned.banRate}% ban rate` : ""}
+                {topMetaBrawler ? `${topMetaBrawler.winRate}% WR · ${topMetaBrawler.pickRate}% pick` : ""}
               </div>
             </div>
             <div className="bg-bg-secondary rounded-lg p-4">
@@ -168,7 +184,9 @@ export default async function DashboardPage() {
                   <span
                     className="text-sm font-medium text-right"
                     style={{
-                      color: b.winRate > 52 ? "#5DCAA5" : "var(--text-primary)",
+                      color: b.winRate > 52
+                        ? "#5DCAA5"
+                        : "var(--text-primary)",
                     }}
                   >
                     {b.winRate}%
@@ -201,23 +219,34 @@ export default async function DashboardPage() {
                   </div>
                 ))}
               </div>
-              {/* Most banned */}
+              {/* Highest win rate — replaces the old "Most banned" card.
+                  We have no real ban data from the API, so that card was
+                  always empty. This fills the space with a real insight:
+                  who's actually winning the most when they show up.
+                  Filtered to real-sample brawlers so a 2-0 curiosity can't
+                  top the list. Bar fills based on how far above 48% the
+                  brawler is; 58% maxes the bar. */}
               <div className="bg-bg-primary border border-border rounded-xl p-4">
-                <div className="text-sm font-medium mb-3">Most banned</div>
-                {topBanned.map((b) => (
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-sm font-medium">Highest win rate</div>
+                  <div className="text-[10px] text-text-tertiary">
+                    real samples only
+                  </div>
+                </div>
+                {topWinRate.map((b) => (
                   <div key={b.id} className="flex items-center gap-2 mb-2">
                     <span className="text-xs flex-1">{b.name}</span>
                     <div className="flex-1 h-1.5 rounded-full bg-bg-tertiary">
                       <div
                         className="h-full rounded-full"
                         style={{
-                          width: `${(b.banRate / 12) * 100}%`,
-                          background: "#ED93B1",
+                          width: `${Math.max(0, Math.min(100, ((b.winRate - 48) / 10) * 100))}%`,
+                          background: "#5DCAA5",
                         }}
                       />
                     </div>
                     <span className="text-xs text-text-secondary w-9 text-right">
-                      {b.banRate}%
+                      {b.winRate}%
                     </span>
                   </div>
                 ))}

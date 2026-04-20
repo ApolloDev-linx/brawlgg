@@ -1,10 +1,11 @@
 import { cached } from "@/lib/redis";
-import { CACHE_TTL, getTier } from "@/lib/constants";
+import { CACHE_TTL } from "@/lib/constants";
+import { safeTier } from "@/lib/stats-utils";
 import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import { DraftBoard } from "@/components/draft/DraftBoard";
 
 async function getBrawlers() {
-  return cached("brawlers:for-draft", CACHE_TTL.BRAWLERS, async () => {
+  return cached("brawlers:for-draft:v2", CACHE_TTL.BRAWLERS, async () => {
     // Reads from BrawlerStat (computed from raw BattleRecord), not from
     // averaging MapBrawlerStat. Avoids the map-filtering bias that was
     // skewing draft suggestions toward brawlers with unmapped-game distortion.
@@ -20,7 +21,10 @@ async function getBrawlers() {
       winRate: b.winRate,
       pickRate: b.pickRate,
       banRate: b.banRate,
-      tier: getTier(b.winRate),
+      // safeTier: S requires ≥1000 battles. Stops a 500-battle 54.6% brawler
+      // (Jae-Yong, Mr. P, etc.) from inheriting the same loud badge as
+      // confirmed-meta brawlers with 2000+ battles (Mandy, Nani).
+      tier: safeTier(b.winRate, b.totalBattles),
     }));
   });
 }

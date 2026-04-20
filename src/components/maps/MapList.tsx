@@ -231,28 +231,29 @@ function MapDetail({
         )}
       </div>
 
-      {/* Stats table */}
+      {/* Stats table — Ban column removed. We have no real ban data from
+          the API, so it was always showing 0% across every row. Grid
+          template collapsed from 7 columns to 6. */}
       <div className="bg-bg-primary border border-border rounded-xl p-4">
         <div className="text-sm font-medium mb-3">
           Top brawlers on {map.name}
         </div>
 
         {/* Header */}
-        <div className="grid grid-cols-[24px_1fr_50px_80px_56px_56px_56px] gap-2 items-center text-xs text-text-secondary pb-2 border-b border-border">
+        <div className="grid grid-cols-[24px_1fr_50px_80px_56px_56px] gap-2 items-center text-xs text-text-secondary pb-2 border-b border-border">
           <span>#</span>
           <span>Brawler</span>
           <span>Tier</span>
           <span>Type</span>
           <span className="text-right">Win</span>
           <span className="text-right">Pick</span>
-          <span className="text-right">Ban</span>
         </div>
 
         {/* Rows */}
         {stats.map((s, i) => (
           <div
             key={s.id}
-            className="grid grid-cols-[24px_1fr_50px_80px_56px_56px_56px] gap-2 items-center py-2"
+            className="grid grid-cols-[24px_1fr_50px_80px_56px_56px] gap-2 items-center py-2"
             style={{
               borderBottom:
                 i < stats.length - 1
@@ -296,9 +297,6 @@ function MapDetail({
             </span>
             <span className="text-sm text-right text-text-secondary">
               {s.pickRate}%
-            </span>
-            <span className="text-sm text-right text-text-secondary">
-              {s.banRate}%
             </span>
           </div>
         ))}
