@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { suggestPick, computeAdvantage } from "@/services/draft-engine";
 import { getTier } from "@/lib/constants";
-import { aggregateBrawlerStats } from "@/lib/stats-utils";
+import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import type { BrawlerWithStats } from "@/types/brawler";
 import type { DraftState } from "@/types/meta";
 
@@ -12,26 +11,23 @@ export async function POST(request: Request) {
     const { bans, myPicks, enemyPicks, currentPhase, currentTurn } =
       body as DraftState;
 
-    const allBrawlers = await prisma.brawler.findMany({
-      include: { mapStats: true },
-    });
+    // Reads from BrawlerStat (no map-filtering bias). The draft engine
+    // now sees the same numbers the /draft page renders on initial load,
+    // so suggestions stay consistent across pick/ban turns.
+    const summaries = await getAllBrawlerSummaries();
 
-    const brawlersWithStats: BrawlerWithStats[] = allBrawlers.map((b) => {
-      const agg = aggregateBrawlerStats(b.mapStats);
-
-      return {
-        id: b.id,
-        name: b.name,
-        role: b.role,
-        type: b.type as any,
-        hp: b.hp,
-        iconUrl: b.iconUrl,
-        winRate: agg.winRate,
-        pickRate: agg.pickRate,
-        banRate: agg.banRate,
-        tier: getTier(agg.winRate),
-      };
-    });
+    const brawlersWithStats: BrawlerWithStats[] = summaries.map((b) => ({
+      id: b.id,
+      name: b.name,
+      role: b.role,
+      type: b.type as any,
+      hp: b.hp,
+      iconUrl: b.iconUrl,
+      winRate: b.winRate,
+      pickRate: b.pickRate,
+      banRate: b.banRate,
+      tier: getTier(b.winRate),
+    }));
 
     const draftState: DraftState = {
       bans: bans || [],

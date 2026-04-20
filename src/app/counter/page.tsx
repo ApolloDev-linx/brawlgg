@@ -1,32 +1,27 @@
-import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
 import { CACHE_TTL, getTier } from "@/lib/constants";
-import { aggregateBrawlerStats } from "@/lib/stats-utils";
+import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import { CounterPicker } from "@/components/counter/CounterPicker";
 
 async function getBrawlers() {
   return cached("brawlers:all-with-stats", CACHE_TTL.BRAWLERS, async () => {
-    const brawlers = await prisma.brawler.findMany({
-      include: { mapStats: true },
-      orderBy: { name: "asc" },
-    });
+    // Reads from BrawlerStat (computed from raw BattleRecord), not from
+    // averaging MapBrawlerStat. Avoids the map-filtering bias that was
+    // silently affecting which counters showed up as recommended picks.
+    const brawlers = await getAllBrawlerSummaries();
 
-    return brawlers.map((b) => {
-      const agg = aggregateBrawlerStats(b.mapStats);
-
-      return {
-        id: b.id,
-        name: b.name,
-        role: b.role,
-        type: b.type as any,
-        hp: b.hp,
-        iconUrl: b.iconUrl,
-        winRate: agg.winRate,
-        pickRate: agg.pickRate,
-        banRate: agg.banRate,
-        tier: getTier(agg.winRate),
-      };
-    });
+    return brawlers.map((b) => ({
+      id: b.id,
+      name: b.name,
+      role: b.role,
+      type: b.type as any,
+      hp: b.hp,
+      iconUrl: b.iconUrl,
+      winRate: b.winRate,
+      pickRate: b.pickRate,
+      banRate: b.banRate,
+      tier: getTier(b.winRate),
+    }));
   });
 }
 
