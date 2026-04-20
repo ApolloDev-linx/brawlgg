@@ -1,17 +1,14 @@
 import { cached } from "@/lib/redis";
-import { CACHE_TTL } from "@/lib/constants";
-import { safeTier } from "@/lib/stats-utils";
+import { CACHE_TTL, getTier } from "@/lib/constants";
 import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import { CounterPicker } from "@/components/counter/CounterPicker";
+import type { BrawlerWithStats } from "@/types/brawler";
 
-async function getBrawlers() {
-  return cached("brawlers:all-with-stats:v2", CACHE_TTL.BRAWLERS, async () => {
-    // Reads from BrawlerStat (computed from raw BattleRecord), not from
-    // averaging MapBrawlerStat. Avoids the map-filtering bias that was
-    // silently affecting which counters showed up as recommended picks.
+async function getBrawlers(): Promise<BrawlerWithStats[]> {
+  return cached("brawlers:all-with-stats", CACHE_TTL.BRAWLERS, async () => {
     const brawlers = await getAllBrawlerSummaries();
 
-    return brawlers.map((b) => ({
+    return brawlers.map((b): BrawlerWithStats => ({
       id: b.id,
       name: b.name,
       role: b.role,
@@ -21,13 +18,10 @@ async function getBrawlers() {
       winRate: b.winRate,
       pickRate: b.pickRate,
       banRate: b.banRate,
-      // safeTier: consistent across dashboard / draft / counter / analyzer
-      // so a brawler's tier badge is the same badge everywhere it appears.
-      tier: safeTier(b.winRate, b.totalBattles),
+      tier: getTier(b.winRate),
     }));
   });
 }
-
 export default async function CounterPage() {
   let brawlers: Awaited<ReturnType<typeof getBrawlers>>;
 
