@@ -164,7 +164,11 @@ export const MIN_BATTLES_FOR_S = 1000;
  * getTier() for places where we only have a winRate and sample is already
  * guaranteed (e.g. per-map stats where the Wilson sort handles it).
  */
-export function safeTier(winRate: number, totalBattles: number): string {
+export type Tier = "S" | "A" | "B" | "C";
+export function safeTier(
+  winRate: number,
+  totalBattles: number
+): Tier {
   if (winRate >= 54 && totalBattles >= MIN_BATTLES_FOR_S) return "S";
   if (winRate >= 51) return "A";
   if (winRate >= 48) return "B";
