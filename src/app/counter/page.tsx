@@ -1,5 +1,6 @@
 import { cached } from "@/lib/redis";
-import { CACHE_TTL, getTier } from "@/lib/constants";
+import { CACHE_TTL } from "@/lib/constants";
+import { safeTier } from "@/lib/stats-utils";
 import { getAllBrawlerSummaries } from "@/lib/brawler-stats-reader";
 import { CounterPicker } from "@/components/counter/CounterPicker";
 import type { BrawlerWithStats } from "@/types/brawler";
@@ -18,10 +19,12 @@ async function getBrawlers(): Promise<BrawlerWithStats[]> {
       winRate: b.winRate,
       pickRate: b.pickRate,
       banRate: b.banRate,
-      tier: getTier(b.winRate),
+      
+      tier: safeTier(b.winRate, b.totalBattles),
     }));
   });
 }
+
 export default async function CounterPage() {
   let brawlers: Awaited<ReturnType<typeof getBrawlers>>;
 
