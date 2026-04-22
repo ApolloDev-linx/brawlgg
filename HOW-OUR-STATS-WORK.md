@@ -1,221 +1,405 @@
 # How Our Stats Work
 
-A no-BS guide to where Apollo Meta's numbers come from, how they end up in our database, and why you can trust them. If you've ever stared at a meta site and asked "...ok but where is this actually coming from?" — this is for you.
+================================================
+  APOLLO META — HOW THE DATA PIPELINE WORKS
+================================================
+
+The whole point of this system is to show REAL win/pick rates
+from actual top-player games, not made-up numbers. Here's how
+it flows from raw API data to the stats you see in the UI.
+
+─────────────────────────────────────────────
+  STEP 1 — HARVEST (scripts/harvest.ts)
+─────────────────────────────────────────────
+
+Run manually with: npx tsx scripts/harvest.ts
+Or as part of the full pipeline: npx tsx scripts/pipeline.ts
+
+What it does:
+
+  1. Pulls the top 200 players from 5 regional leaderboards
+     (Global, US, GB, KR, BR) — ~984 unique players total.
+
+  2. For each player, fetches their last 25 battle logs from
+     the Brawl Stars API.
+
+  3. Filters out anything we don't care about:
+     - Non-competitive modes (Showdown, 5v5 events, novelty modes)
+     - Friendly / practice games
+     - Battles with missing timestamps or no result field
+
+  4. For every valid battle, writes a BattleRecord row into the
+     DB for EACH player in that game (all 6 players in a 3v3),
+     with the correct win/loss flipped per team.
+
+  5. Chain harvesting: every unique player tag seen in those
+     battles gets added to a secondary pool. We then harvest up
+     to 400 of those too — so we're not just getting the top
+     200, we're getting their opponents and teammates as well.
+     This gives us a much richer sample.
+
+  Result: ~185,000+ BattleRecord rows in the DB, each tied to
+  a specific brawler + map + result. Every row is raw and
+  append-only — we never edit or delete BattleRecord data. If
+  we ever want to change what counts as "competitive," we just
+  change the aggregation filter, not the raw log.
+
+─────────────────────────────────────────────
+  STEP 2 — AGGREGATE (stat-aggregator.ts)
+─────────────────────────────────────────────
+
+Triggered by: hitting /api/cron/aggregate
+              (or automatically every 2 hours in production)
+
+This step writes to TWO tables — and that split matters. A
+single aggregate table inherits whichever filter it uses, and
+an earlier version of this pipeline was silently dropping ~18%
+of real battles because of a map-filter mismatch (mostly 5v5
+events the API tags ambiguously). Splitting fixes that.
+
+  TABLE A — MapBrawlerStat (per-map rankings)
+  -------------------------------------------
+  One row per (map × brawler). Powers the /maps page.
+
+  For each (map, brawler) pair it computes:
+       - Win rate  = victories / total appearances
+       - Pick rate = appearances / total picks on that map
+       - Sample size (total battles)
+       - isReal flag (true if sample ≥ 50)
+
+  Note: this table ONLY includes battles on maps we have in
+  our Map table. 5v5 event maps and retired maps get dropped
+  here intentionally — the per-map page should only rank
+  real 3v3 ranked maps.
+
+  TABLE B — BrawlerStat (overall per-brawler totals)
+  --------------------------------------------------
+  One row per brawler. Powers the dashboard, counter picker,
+  draft simulator, and analyzer.
+
+  Computed directly from BattleRecord with NO map filter, so
+  every competitive-mode battle counts toward a brawler's
+  overall stats — not just the ones on maps we happen to
+  track. This is what fixes the "why does Lou look like
+  top-3?" bias the old single-table pipeline had.
+
+  Tracked competitive modes (both tables):
+     Gem Grab, Brawl Ball, Bounty, Heist, Hot Zone,
+     Knockout, Siege, Wipeout, Duels
+
+  Note on Duels: it's 1v1, not 3v3. Tank/sustain brawlers
+  underperform there (burst damage dominates). Included as a
+  deliberate product call — it's still real competitive data,
+  just weighted into overall stats.
+
+─────────────────────────────────────────────
+  STEP 2.5 — WIN RATE SHRINKAGE (stats-utils.ts)
+─────────────────────────────────────────────
+
+Raw win rates lie when samples are small. A brawler with a
+3-0 record has a 100% win rate but the signal is noise. To
+fix this, every displayed win rate gets pulled toward 50%
+using a Bayesian prior of 50 virtual 50/50 games:
+
+    shown_rate = (wins + 25) / (total + 50)
+
+Effect at different sample sizes:
+    3 wins / 3 games   (100% raw) → 53.6% shown
+    27 wins / 50 games (54% raw)  → 52% shown
+    270 wins / 500     (54% raw)  → 53.6% shown
+    2700 wins / 5000   (54% raw)  → 53.9% shown
 
----
+Big-sample brawlers barely move. Tiny-sample brawlers get
+pulled hard toward the middle so they can't top dashboards
+on noise alone.
 
-## The short version
+Pick rate is NOT shrunk — it's a pure ratio and small
+samples don't produce misleading outliers there.
+
+─────────────────────────────────────────────
+  STEP 2.6 — TIER ASSIGNMENT (safeTier)
+─────────────────────────────────────────────
+
+Tiers are the loudest badge on the site, so they need to
+mean something. The assignment:
+
+    S = win rate 54%+ AND total battles 1000+
+    A = win rate 51%+
+    B = win rate 48%+
+    C = below 48%
 
-1. We pull **real battle data** straight from Supercell's official Brawl Stars API.
-2. Every time someone looks up a player on our site, we quietly save their last ~25 battles.
-3. We also run a **harvester** that pulls the top 200 global and regional players, plus every opponent and teammate in their battle logs.
-4. A background job aggregates those battles every 2 hours into win rates, pick rates, and tier rankings per map.
-5. Stats only get marked as **"real"** once we have at least **50 battles** for that brawler on that map. Below that threshold, we fall back to simulated placeholders so maps never look empty.
-6. The **Triangle Counter** system layers a type-based matchup model on top of those real stats to recommend counter picks.
-
-That's the whole pipeline. The rest of this doc is just explaining each piece honestly.
-
----
-
-## Where the data comes from
-
-**Source:** the official Brawl Stars API at `api.brawlstars.com/v1`, run by Supercell themselves. Same API every serious BS site uses. You can get a key at developer.brawlstars.com.
-
-Every battle record we store comes from one of two endpoints:
-
-- `/players/{tag}/battlelog` — a single player's last ~25 battles
-- `/rankings/{country}/players` — top 200 players on global or regional leaderboards
-
-We do **not** scrape, make up, or buy data. If the API didn't report a battle, it's not in our system.
-
----
-
-## How battles get into the database
-
-Two ways, both automated:
-
-### 1. Passive collection — player lookups
-
-Every time someone searches a player tag on our site, we fire off a background job that saves that player's battle log. The lookup response itself isn't blocked by this — it just happens behind the scenes. So every search helps build our dataset.
-
-From `src/app/api/players/[tag]/route.ts`:
-
-```ts
-// Fire-and-forget: save battle log in the background
-// This seeds our real stats dataset without blocking the response
-saveBattleLog(prisma, tag).then(...)
-```
-
-### 2. Active collection — the harvester
-
-`scripts/harvest.ts` is a script we run that:
-
-1. Pulls the top 200 players from the global leaderboard and several regional ones.
-2. Gets each of their battle logs.
-3. For every battle, grabs the tags of all 6 players involved.
-4. Goes one level deep and pulls their battle logs too.
-
-That's how we get broad coverage without needing millions of users. Top players tend to play against other top players, so chain-harvesting one level deep snowballs into thousands of competitive battles fast.
-
----
-
-## What we filter out
-
-Not every battle counts. The ingestion code specifically throws away:
-
-- **Friendly games** (`battle.type === "friendly"`) — no stakes, people troll-pick
-- **Practice matches**
-- **Showdown solo/duo** when computing 3v3 meta stats — different game entirely
-- **Modes we don't track** — only `gemGrab`, `brawlBall`, `bounty`, `heist`, `hotZone`, `knockout`, `siege` count as "competitive 3v3"
-- **Battles with missing map or mode data** — can't attribute them anywhere
-
-This matters. A lot of sloppy meta sites don't filter friendlies and end up with weird picks dominating because people meme in custom rooms.
-
----
-
-## How we compute the actual numbers
-
-This all lives in `src/services/stat-aggregator.ts` and runs every 2 hours.
-
-### Win rate
-
-```
-winRate = (wins / total_battles) × 100
-```
-
-Rounded to one decimal. A brawler played 1000 times on a map with 540 wins has a 54.0% win rate. That's it — no weighting, no secret sauce.
-
-### Pick rate
-
-```
-pickRate = (times_this_brawler_was_picked / total_picks_on_this_map) × 100
-```
-
-Same deal — straight ratio.
-
-### Sample size and the "isReal" flag
-
-Every stat row has an `isReal` boolean. It gets flipped to `true` only when:
-
-```ts
-const MIN_SAMPLE = 50;
-const isReal = stats.total >= MIN_SAMPLE;
-```
-
-Below 50 recorded battles on that map for that brawler, the number is considered unreliable and treated as a placeholder. You'll see a small indicator in the UI telling you which stats are real vs. seeded.
-
-**Why 50?** It's the point where the margin of error on a win rate tightens enough to be meaningful (roughly ±7 points at a 95% confidence level). More is obviously better — 500 battles gets you to ±2 points — but 50 is the minimum bar before we'll call it a real signal.
-
-### Tier assignment
-
-```ts
-if (winRate >= 54) return "S";
-if (winRate >= 51) return "A";
-if (winRate >= 48) return "B";
-return "C";
-```
-
-That's the whole function. No committee of experts, no vibes. Pure win rate buckets.
-
----
-
-## The Triangle Counter — how it actually works
-
-This is the piece most people are curious about. It sits in `src/lib/constants.ts` and `src/services/counter-engine.ts`.
-
-### The model
-
-Every brawler is tagged with one of five **types**:
-
-- **Lane / Control** — mid-range consistent damage (Tara, Gene, Byron)
-- **Tank** — high HP, short range (Rosa, El Primo, Frank)
-- **Assassin** — burst damage, mobility (Edgar, Mortis, Leon)
-- **Thrower** — lobs projectiles over walls (Barley, Dyna, Tick)
-- **Sniper** — long-range high-damage (Piper, Brock, Belle)
-
-The types form a rock-paper-scissors style matrix. The core rules:
-
-| Type     | Strong vs        | Weak vs       |
-|----------|------------------|---------------|
-| Lane     | Tank, Assassin   | Thrower, Sniper |
-| Tank     | Thrower, Sniper  | Lane          |
-| Assassin | Thrower, Sniper  | Lane, Tank    |
-| Thrower  | Lane             | Tank, Assassin |
-| Sniper   | Lane             | Tank, Assassin |
-
-This isn't arbitrary — it mirrors how the game actually plays. Tanks close the gap on squishy backline brawlers. Snipers and throwers punish lanes that try to hold open ground. Lanes out-trade tanks and assassins when they can keep distance. Assassins dive the backline but get melted by sustained lane damage.
-
-### The scoring
-
-When you plug enemy picks into the counter tool, every available brawler gets a `counterScore` computed like this:
-
-```
-For each enemy pick:
-  +2 if my brawler's type is strong against the enemy's type
-  -1 if my brawler's type is weak against the enemy's type
-
-Then: + (winRate - 50) / 5   ← small tiebreaker from real map data
-```
-
-Example — enemy team is a Tank, an Assassin, and a Thrower. You're considering a Lane brawler.
-
-- Strong vs Tank → +2
-- Strong vs Assassin → +2
-- Weak vs Thrower → -1
-- Win rate on this map is 53% → +0.6
-
-Final score: **+3.6**
-
-A Sniper in the same spot:
-
-- Weak vs Tank → -1
-- Weak vs Assassin → -1
-- Strong vs Thrower → +2
-- Win rate 55% → +1.0
-
-Final score: **+1.0**
-
-The Lane brawler wins the recommendation, even though the Sniper has a higher raw win rate. That's the whole point — the counter engine accounts for matchup dynamics, not just "who's strongest overall."
-
-### Why this isn't just a gimmick
-
-Two reasons:
-
-1. The types are **manually curated** (see `BRAWLER_TYPE_OVERRIDES` in `constants.ts`) rather than pulled blindly from Supercell's role tags, because Supercell's labels are for beginner UX, not competitive accuracy. An "Assassin" in the in-game menu might actually behave like a Lane brawler competitively.
-2. The win-rate component is small on purpose (÷5). It's a tiebreaker, not the driver. That way a brawler doesn't get recommended just because they're S-tier in the abstract — they have to actually counter what's in front of them.
-
----
-
-## How often things update
-
-| What                          | How often        | Where              |
-|-------------------------------|------------------|--------------------|
-| Battle records ingested       | Continuously, per lookup | API route handler |
-| Aggregated win/pick rates     | Every 2 hours    | Cron job           |
-| Tier recalculation + daily snapshot | Every 2 hours | `compute-win-rates.ts` |
-| Harvester (bulk seeding)      | Manual, ~every few days | `scripts/harvest.ts` |
-| API response cache            | 5 minutes        | Redis / in-memory  |
-
-So the numbers you're looking at are at most 2 hours stale on the aggregation side, and at most 5 minutes stale on the API cache side.
-
----
-
-## What we're honest about
-
-A few things skeptics should know that most meta sites bury:
-
-- **Ban rates are currently 0 on most rows.** The Brawl Stars API doesn't expose bans from ranked drafts cleanly, so our ban rate column is mostly placeholder until Supercell opens that data up or we build a ranked-draft ingestion path. Anyone claiming precise ban rates without a ranked data deal is probably guessing.
-- **We don't see private matches or club leagues.** Only public battle logs.
-- **The API rate-limits us.** We can't re-pull everyone's log every minute. There's a 200ms delay between requests in the harvester and we respect the `x-ratelimit-remaining` header. Some stats will always be slightly behind live reality.
-- **Low-sample rows are seeded.** If a brawler has been played 12 times on a new map, you'll see a number — but `isReal: false`. Don't screenshot that and post it as gospel.
-- **Counter scores are a model, not a ground truth.** They're grounded in type theory plus real win rates, but they won't capture every interaction (e.g. specific gadget/star power synergies). Use them as a starting point, not scripture.
-
----
-
-## How to verify any of this yourself
-
-1. Every file mentioned in this doc is in our repo — `src/services/stat-aggregator.ts`, `src/services/counter-engine.ts`, `src/services/battle-log-service.ts`, `scripts/harvest.ts`.
-2. The Brawl Stars API is public. Pull the same battle log for any player and check our stored `BattleRecord` rows against it — they should match exactly.
-3. Pick any map-brawler row in the database and divide `wins / total` yourself. Should equal our displayed win rate to one decimal.
-
-That's it. No magic, no paid data feeds, no ML models guessing at reality. Just Supercell's own battle data, filtered, aggregated, and served back to you — with the matchup triangle layered on top to turn raw win rates into actual draft advice.
+The 1000-battle floor for S is the guard. At 1000 games, a
+54% observed rate has a 95% confidence interval of about
+±3pp — true rate is very likely 51%+, which is genuinely
+strong. Without the floor, a 500-battle brawler with a hot
+streak would get the same S badge as one with years of
+proven data. The rule references no brawler by name —
+everyone auto-promotes or auto-demotes as their data moves.
+
+A, B, C use win rate alone — the prior shrinkage already
+handles small samples for the quieter badges.
+
+─────────────────────────────────────────────
+  STEP 3 — PER-MAP RANKING (Wilson score)
+─────────────────────────────────────────────
+
+Per-map rankings (/maps page) don't sort by raw win rate —
+they sort by Wilson score lower bound at 95% confidence with
+a 50-game Bayesian prior.
+
+Wilson answers: "what's the LOWEST plausible true win rate
+given this sample?" It pulls uncertain samples down harder
+than certain ones. So 2-0 (100% raw) ranks below 44-33 (57%
+raw) because the first has too little data to trust.
+
+Same trick Reddit uses to rank comments. Right math for
+"rank," while we still display the raw (prior-shrunk)
+percentage for "what does this brawler actually win at."
+
+─────────────────────────────────────────────
+  STEP 3.5 — PICK CALLOUTS (map detail cards)
+─────────────────────────────────────────────
+
+Three cards on every map detail page, picked LIVE from the
+map's stats — not from a pre-computed field:
+
+  BEST FIRST PICK
+     Top of the Wilson-sorted list, restricted to brawlers
+     with a real sample. Falls back to rank #1 only if no
+     brawler on the map has crossed 50 battles yet.
+
+  SAFEST PICK
+     Win rate 51%+ AND pick rate 3%+ AND isReal. The
+     consensus strong-and-popular choice. Among qualifiers,
+     the most-picked wins the card.
+
+  HIGH RISK / HIGH REWARD
+     Win rate 53%+ AND pick rate under 3% AND isReal. Niche
+     picks punching above their weight — under-the-radar
+     but winning. Highest win rate among qualifiers.
+
+Any of the three can return empty, and the card simply
+doesn't render. We'd rather show two cards than fake a
+third.
+
+─────────────────────────────────────────────
+  STEP 4 — COUNTER ENGINE (counter-engine.ts)
+─────────────────────────────────────────────
+
+Used live in the UI — no cron needed.
+
+What it does:
+
+  Brawlers are typed: lane, tank, assassin, thrower, sniper.
+  There's a COUNTER_MATRIX that defines the competitive triangle:
+
+    - Lane beats Thrower (out-ranges them)
+    - Tank beats Assassin (absorbs burst)
+    - Assassin beats Lane (dives squishy targets)
+    - Thrower beats Tank (ignores walls)
+    - Sniper beats Lane (out-pokes)
+    ... and so on
+
+  When you select enemy brawlers in the counter tool or draft
+  sim, it scores every available brawler:
+
+    +2 for each enemy type it's strong against
+    -1 for each enemy type it's weak against
+    + small bonus from win rate (tiebreaker)
+
+  Returns a ranked list of counters with reasons like:
+  "Mortis (assassin) counters Poco (lane): gap-closer into
+   squishy targets."
+
+  This is labeled as competitive theory in the UI — it's a
+  model, not empirical head-to-head data. Our BattleRecord
+  only stores the harvested player's brawler per battle, not
+  the full enemy roster, so we can't compute true matchup
+  win rates yet. That's a planned upgrade once the schema
+  captures all 6 participants per battle.
+
+  Runs purely in-memory — no DB calls after the initial
+  brawler fetch.
+
+─────────────────────────────────────────────
+  STEP 5 — DRAFT ENGINE (draft-engine.ts)
+─────────────────────────────────────────────
+
+Powers the draft simulator page.
+
+What it does:
+
+  - Tracks ban/pick state for both teams
+  - In ban phase: recommends highest-impact brawlers to ban
+    (win rate × pick rate = danger score)
+  - In pick phase: runs the counter engine against enemy picks
+    and returns top 3 suggestions with reasoning
+  - Computes a live draft advantage score:
+      (your team avg win rate) - (enemy team avg win rate)
+      Positive = you're favoured, negative = you're behind
+
+─────────────────────────────────────────────
+  HOW IT ALL CONNECTS
+─────────────────────────────────────────────
+
+  Brawl Stars API
+        │
+        ▼
+  scripts/harvest.ts  ──────► BattleRecord table (raw data)
+                                      │
+                                      ▼
+                             stat-aggregator.ts
+                                      │
+                           ┌──────────┴──────────┐
+                           ▼                     ▼
+                  BrawlerStat table      MapBrawlerStat table
+                  (overall per brawler,   (per-map win/pick,
+                   no map filter —        tiers, isReal flag,
+                   every tracked battle   Wilson-sorted in UI)
+                   counts)                         │
+                           │                       │
+                           ▼                       ▼
+           Dashboard / Counter /              Map detail pages
+            Draft / Analyzer                 (rankings + pick
+           (shrunk WR, safeTier,               callout cards)
+            impact sort, hidden
+            gems panel)
+                           │
+                           ▼
+                   Counter engine
+                 (type-matrix scoring
+                  + WR tiebreaker)
+                           │
+                           ▼
+                   Draft simulator
+                (ban/pick suggestions,
+                 live advantage score)
+
+─────────────────────────────────────────────
+  WHAT EACH DASHBOARD PANEL MEANS
+─────────────────────────────────────────────
+
+  TOP METRIC TILES
+     Active brawlers     — count currently in the meta
+     Avg win rate        — mean across all brawlers (pinned
+                            near 50% by construction)
+     Top meta brawler    — #1 by impact (win × pick)
+     Maps tracked        — count of active maps
+
+  TOP IN META (left panel)
+     Sorted by impact = (win rate × pick rate) / 100.
+     Answers: "which brawlers are actually shaping the meta?"
+     A brawler ranks high because they're picked often AND
+     winning. Mortis tops it even though his WR isn't the
+     highest on the site — he's in so many games you can't
+     ignore him.
+
+  MOST PICKED (right top)
+     Pure pick rate sort. Top 5.
+
+  HIGHEST WIN RATE (right bottom)
+     Pure win rate sort, filtered to real-sample brawlers.
+     Answers a DIFFERENT question than "Top in meta" —
+     surfaces under-the-radar brawlers who are statistically
+     strongest when they show up, even if they're not
+     defining the meta yet. Useful for draft decisions.
+
+─────────────────────────────────────────────
+  WHAT WE'RE HONEST ABOUT
+─────────────────────────────────────────────
+
+  NO BAN DATA
+     The Brawl Stars API doesn't expose ranked-draft bans,
+     so we stripped all ban-rate UI from the site. Empty
+     columns are worse than no columns. Any meta site
+     claiming precise ban rates without a Supercell data
+     deal is making them up.
+
+  NO ENEMY BRAWLER DATA (yet)
+     We only store the harvested player's brawler per
+     battle, not the full 6-brawler lineup. This means
+     "pick rate" is really "share of harvested player-
+     battles," not true game frequency. Correlates closely
+     if the sample is representative, but they're not
+     identical.
+
+     It also means counter recommendations are competitive
+     theory plus meta strength, not real head-to-head
+     matchup data. That's the big planned upgrade.
+
+  ONLY PUBLIC BATTLE LOGS
+     No private matches, no club leagues. Only what the
+     Brawl Stars public API exposes.
+
+  RATE LIMITED
+     The API rate-limits us. Harvester has a 200ms delay
+     between requests and respects x-ratelimit-remaining.
+     Some stats are always slightly behind live reality.
+
+  LOW-SAMPLE ROWS
+     Per-map rows with fewer than 50 battles are marked
+     isReal=false. We do not show them in pick callouts or
+     use them for S-tier assignment. If you see a stat in
+     the UI, it's either backed by ≥50 battles or we've
+     labeled it as seeded/simulated.
+
+─────────────────────────────────────────────
+  HOW TO VERIFY ANY OF THIS YOURSELF
+─────────────────────────────────────────────
+
+  /debug/stats
+     Per-brawler comparison of raw BattleRecord win rates
+     vs what's stored in the BrawlerStat table. They share
+     the same SQL source, so they should match within
+     ±0.5pp. Any drift is a real bug. Also shows what
+     numbers would look like under the OLD map-filtered
+     aggregation path, with deltas — visual proof of the
+     bias we fixed.
+
+  /debug/maps
+     Which map names from BattleRecord matched our Map
+     table and which got dropped. If 5v5 events are
+     leaking into 3v3 stats, you'd see it here.
+
+  The Brawl Stars API is public. Pull any player's battle
+  log and check our BattleRecord rows against it — they
+  should match exactly.
+
+─────────────────────────────────────────────
+  ROUTINE TO KEEP DATA FRESH
+─────────────────────────────────────────────
+
+  Full pipeline (harvest + aggregate, ~10-20 min):
+    npx tsx scripts/pipeline.ts
+
+  Just re-run the math against existing data (~2-7 min):
+    npx tsx scripts/pipeline.ts --aggregate-only
+
+  Sync dictionaries + recompute, no new battles:
+    npx tsx scripts/pipeline.ts --skip-harvest
+
+  Trigger aggregation via HTTP:
+    curl http://localhost:3000/api/cron/aggregate
+    (or just let the 2hr cron fire in production)
+
+  After any pipeline run, restart the dev server to flush
+  the in-memory cache:
+    npm run dev
+
+─────────────────────────────────────────────
+  WHY TOP PLAYERS?
+─────────────────────────────────────────────
+
+  Leaderboard players play the actual competitive meta.
+  They draft intentionally, play optimal modes, and their
+  results reflect real brawler strength — not casual chaos.
+  This makes the win/pick rates actually meaningful for the
+  competitive audience the app targets.
+
+  Chain harvesting one hop deep (400 secondary players on
+  top of the initial ~984 from leaderboards) pulls in the
+  opponents and teammates those top players fought against.
+  So the sample isn't just the top of the ladder — it's
+  the competitive ecosystem around them.
+
+================================================
