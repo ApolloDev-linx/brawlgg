@@ -393,6 +393,7 @@ export const BRAWLER_TYPE_OVERRIDES: Record <
   "Ziggy":          { role: "Control",  type: "lane" },
   "Jae-Yong":       { role: "Support",  type: "lane" },
   "Chuck":          { role: "Damage",   type: "lane" },
+  "Damian":	    { role: "Tank", type: "tank"},
 
   // --- Legendaries ---
   "Spike":     { role: "Damage",   type: "lane" },

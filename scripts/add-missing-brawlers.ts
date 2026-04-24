@@ -12,8 +12,7 @@ import { BRAWLER_TYPE_OVERRIDES } from "../src/lib/constants";
 const prisma = new PrismaClient();
 
 const MISSING = [
-  { name: "Najia",  hp: 6800 },
-  { name: "Sirius", hp: 7400 },
+  {name:  "Damian", hp: 11200 },
 ];
 
 async function main() {

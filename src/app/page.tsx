@@ -253,7 +253,10 @@ export default async function DashboardPage() {
               </div>
             </div>
           </div>
-          <div className="mt-6 flex gap-3">
+          {/* Footer links — /methodology is the public explainer for how
+              every number on this page is computed. Put it right next to
+              the tool links so skeptical users find it naturally. */}
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href="/maps"
               className="text-sm text-text-secondary hover:text-text-primary transition-colors"
@@ -271,6 +274,12 @@ export default async function DashboardPage() {
               className="text-sm text-text-secondary hover:text-text-primary transition-colors"
             >
               Draft simulator →
+            </Link>
+            <Link
+              href="/methodology"
+              className="text-sm text-text-secondary hover:text-text-primary transition-colors ml-auto"
+            >
+              How our stats work →
             </Link>
           </div>
         </>
