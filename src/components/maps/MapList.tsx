@@ -39,6 +39,37 @@ interface ModeData {
   icon: string;
 }
 
+// ---------------------------------------------------------------------------
+// Initials helper — matches the dashboard convention. Two-letter chip.
+// ---------------------------------------------------------------------------
+function initials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "??";
+  const first = trimmed[0].toUpperCase();
+  const rest = trimmed.slice(1).replace(/[^a-zA-Z]/g, "");
+  const second = (rest[0] || trimmed[0]).toLowerCase();
+  return first + second;
+}
+
+function InitialsChip({ name, size = "default" }: { name: string; size?: "default" | "sm" }) {
+  const dims = size === "sm"
+    ? { width: 22, height: 18, fontSize: 9 }
+    : { width: 26, height: 22, fontSize: 10 };
+  return (
+    <span
+      className="inline-flex items-center justify-center font-semibold rounded-md border border-border"
+      style={{
+        background: "var(--bg-tertiary)",
+        color: "var(--text-secondary)",
+        letterSpacing: "-0.02em",
+        ...dims,
+      }}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
 export function MapList({
   maps,
   modes,
@@ -79,7 +110,9 @@ export function MapList({
         ))}
       </div>
 
-      {/* Map grid */}
+      {/* Map grid — original layout: mode tag on left next to map name,
+          top-5 brawler chips below, "Best:" line at bottom. Only the
+          chip styling is upgraded to match the dashboard convention. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((map) => {
           const topBrawler = map.brawlerStats[0]?.brawler;
@@ -100,21 +133,20 @@ export function MapList({
                   </div>
                 </div>
               </div>
+
+              {/* Top 5 — replaced 3-letter slices with proper initials chips */}
               <div className="flex gap-1">
                 {map.brawlerStats.slice(0, 5).map((s) => (
-                  <span
-                    key={s.id}
-                    title={s.brawler.name}
-                    className="text-[10px] bg-bg-secondary px-1.5 py-0.5 rounded text-text-secondary"
-                  >
-                    {s.brawler.name.slice(0, 3)}
-                  </span>
+                  <InitialsChip key={s.id} name={s.brawler.name} size="sm" />
                 ))}
               </div>
+
               {topBrawler && (
                 <div className="text-[11px] text-text-tertiary mt-2">
-                  Best: {topBrawler.name} (
-                  {map.brawlerStats[0]?.winRate}% WR)
+                  Best: {topBrawler.name}{" "}
+                  <span className="font-mono">
+                    ({map.brawlerStats[0]?.winRate}% WR)
+                  </span>
                 </div>
               )}
             </button>
@@ -167,6 +199,10 @@ function MapDetail({
   const safePick = pickSafest(stats);
   const riskPick = pickHighRiskHighReward(stats);
 
+  // Bar scaling: 40% WR = empty bar, 60% WR = full bar. 50% sits at the
+  // midpoint, matching the dashboard's stat bar convention.
+  const barFill = (wr: number) => Math.max(0, Math.min(100, ((wr - 40) / 20) * 100));
+
   return (
     <div>
       <button
@@ -188,72 +224,76 @@ function MapDetail({
         </div>
       </div>
 
-      {/* Pick category cards */}
+      {/* Pick category cards — original 3-card layout. Only the label
+          gets upgraded to uppercase micro-tracking, percentages get
+          mono font. */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {firstPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-xs text-text-secondary mb-1">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               Best first pick
             </div>
             <div className="text-base font-medium" style={{ color: "#EF9F27" }}>
               {firstPick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {firstPick.winRate}% WR · {firstPick.pickRate}% pick
             </div>
           </div>
         )}
         {safePick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-xs text-text-secondary mb-1">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               Safest pick
             </div>
             <div className="text-base font-medium" style={{ color: "#5DCAA5" }}>
               {safePick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {safePick.winRate}% WR · {safePick.pickRate}% pick
             </div>
           </div>
         )}
         {riskPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-xs text-text-secondary mb-1">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               High risk / reward
             </div>
             <div className="text-base font-medium" style={{ color: "#ED93B1" }}>
               {riskPick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {riskPick.winRate}% WR · {riskPick.pickRate}% pick (niche)
             </div>
           </div>
         )}
       </div>
 
-      {/* Stats table — Ban column removed. We have no real ban data from
-          the API, so it was always showing 0% across every row. Grid
-          template collapsed from 7 columns to 6. */}
+      {/* Stats table — column order:
+          Rank # / Tier badge / initials chip / name / type pill / WIN bar+% / PICK%.
+          Rank sits flush left of the tier badge in mono font — gives the
+          row a clean numeric anchor without taking its own wide column. */}
       <div className="bg-bg-primary border border-border rounded-xl p-4">
         <div className="text-sm font-medium mb-3">
           Top brawlers on {map.name}
         </div>
 
-        {/* Header */}
-        <div className="grid grid-cols-[24px_1fr_50px_80px_56px_56px] gap-2 items-center text-xs text-text-secondary pb-2 border-b border-border">
+        {/* Header — labels align with the data underneath */}
+        <div className="grid grid-cols-[20px_28px_28px_1fr_120px_140px_56px] gap-3 items-center text-[10px] text-text-tertiary uppercase tracking-widest pb-2 border-b border-border">
           <span>#</span>
+          <span></span>
           <span>Brawler</span>
-          <span>Tier</span>
+          <span></span>
           <span>Type</span>
-          <span className="text-right">Win</span>
-          <span className="text-right">Pick</span>
+          <span className="text-right">Win%</span>
+          <span className="text-right">Pick%</span>
         </div>
 
         {/* Rows */}
         {stats.map((s, i) => (
           <div
             key={s.id}
-            className="grid grid-cols-[24px_1fr_50px_80px_56px_56px] gap-2 items-center py-2"
+            className="grid grid-cols-[20px_28px_28px_1fr_120px_140px_56px] gap-3 items-center py-2"
             style={{
               borderBottom:
                 i < stats.length - 1
@@ -261,10 +301,14 @@ function MapDetail({
                   : "none",
             }}
           >
-            <span className="text-xs text-text-tertiary">{i + 1}</span>
-            <span className="text-sm font-medium">{s.brawler.name}</span>
+            {/* Rank — mono, tertiary text, sits flush left of the tier */}
+            <span className="text-xs text-text-tertiary font-mono">
+              {i + 1}
+            </span>
+
+            {/* Tier — square 22×22 badge, leftmost */}
             <span
-              className="text-xs px-1.5 py-0.5 rounded w-fit"
+              className="text-xs font-semibold rounded-md w-[22px] h-[22px] inline-flex items-center justify-center"
               style={{
                 background: (TIER_COLORS as any)[s.tier] + "22",
                 color: (TIER_COLORS as any)[s.tier],
@@ -272,30 +316,57 @@ function MapDetail({
             >
               {s.tier}
             </span>
+
+            {/* Initials chip */}
+            <InitialsChip name={s.brawler.name} />
+
+            {/* Name */}
+            <span className="text-sm font-medium truncate">
+              {s.brawler.name}
+            </span>
+
+            {/* Type pill */}
             <span
-              className="text-xs px-1.5 py-0.5 rounded w-fit"
+              className="text-[11px] font-medium px-2 py-0.5 rounded-md w-fit"
               style={{
-                background:
-                  (TYPE_COLORS as any)[s.brawler.type] + "18",
+                background: (TYPE_COLORS as any)[s.brawler.type] + "22",
                 color: (TYPE_COLORS as any)[s.brawler.type],
               }}
             >
               {(TYPE_LABELS as any)[s.brawler.type] || s.brawler.type}
             </span>
-            <span
-              className="text-sm font-medium text-right"
-              style={{
-                color:
-                  s.winRate > 53
-                    ? "#5DCAA5"
-                    : s.winRate < 48
-                      ? "#F09595"
-                      : "var(--text-primary)",
-              }}
-            >
-              {s.winRate}%
-            </span>
-            <span className="text-sm text-right text-text-secondary">
+
+            {/* Win — mini stat bar + percentage in mono */}
+            <div className="flex items-center gap-2 justify-end">
+              <span
+                className="inline-block h-1 rounded-full bg-bg-tertiary overflow-hidden"
+                style={{ width: 60 }}
+              >
+                <span
+                  className="block h-full rounded-full"
+                  style={{
+                    width: `${barFill(s.winRate)}%`,
+                    background: (TYPE_COLORS as any)[s.brawler.type],
+                  }}
+                />
+              </span>
+              <span
+                className="text-sm font-semibold font-mono"
+                style={{
+                  color:
+                    s.winRate > 53
+                      ? "#5DCAA5"
+                      : s.winRate < 48
+                        ? "#F09595"
+                        : "var(--text-primary)",
+                }}
+              >
+                {s.winRate}%
+              </span>
+            </div>
+
+            {/* Pick */}
+            <span className="text-sm text-right text-text-secondary font-mono">
               {s.pickRate}%
             </span>
           </div>
