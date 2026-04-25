@@ -10,6 +10,13 @@ import {
 import { toBrawlerName } from "@/lib/brawler-name";
 import type { BrawlerType } from "@/types/brawler";
 
+// Brawlers to exclude from sync — e.g. retired time-limited crossovers.
+// Brawlify keeps these in their roster after they're removed from the game,
+// so we explicitly skip them to keep our DB and meta clean.
+const EXCLUDED_BRAWLERS = new Set<string>([
+  "Buzz Lightyear", // retired Toy Story crossover (Dec 2024 - Feb 2025)
+]);
+
 interface NormalizedBrawler {
   name: string;
   role: string;
@@ -18,11 +25,9 @@ interface NormalizedBrawler {
   iconUrl: string | null;
   externalId: number;
 }
-
 function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
   const name = toBrawlerName(raw.name);
   const className = (raw.class?.name || "").toLowerCase();
-
   // 1. Authoritative: hand-curated overrides win, always.
   const override = BRAWLER_TYPE_OVERRIDES[name];
   if (override) {
@@ -35,7 +40,6 @@ function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
       externalId: raw.id,
     };
   }
-
   // 2. Unknown brawler (probably a new release) — fall back to API class
   //    mapping, but LOUDLY log so we know to add them to BRAWLER_TYPE_OVERRIDES.
   const mappedType = CLASS_TO_TYPE[className];
@@ -59,7 +63,6 @@ function normalizeBrawler(raw: BrawlifyBrawler): NormalizedBrawler {
     externalId: raw.id,
   };
 }
-
 function estimateHp(className: string, name: string): number {
   const known: Record<string, number> = {
     Shelly: 5320, Nita: 5600, Colt: 3920, Bull: 7000, Brock: 3640,
@@ -78,15 +81,14 @@ function estimateHp(className: string, name: string): number {
     default: return 4480;
   }
 }
-
 export interface SyncResult {
   source: "api" | "fallback";
   total: number;
   created: number;
   updated: number;
+  excluded: number;
   errors: string[];
 }
-
 export async function syncBrawlerData(
   prisma: PrismaClient
 ): Promise<SyncResult> {
@@ -95,6 +97,7 @@ export async function syncBrawlerData(
     total: 0,
     created: 0,
     updated: 0,
+    excluded: 0,
     errors: [],
   };
   let rawBrawlers: BrawlifyBrawler[] = [];
@@ -113,8 +116,23 @@ export async function syncBrawlerData(
       imageUrl2: "",
     })) as BrawlifyBrawler[];
   }
-  const normalized = rawBrawlers.map(normalizeBrawler);
+
+  // Normalize everything first, then drop anything in the exclusion set.
+  // Exclusion happens AFTER normalization so EXCLUDED_BRAWLERS keys match
+  // canonical title-case names (e.g. "Buzz Lightyear", not "BUZZ LIGHTYEAR").
+  const allNormalized = rawBrawlers.map(normalizeBrawler);
+  const excluded = allNormalized.filter((b) => EXCLUDED_BRAWLERS.has(b.name));
+  const normalized = allNormalized.filter((b) => !EXCLUDED_BRAWLERS.has(b.name));
+
+  if (excluded.length > 0) {
+    console.info(
+      `[brawler-sync] Excluded ${excluded.length} retired brawler(s): ` +
+        excluded.map((b) => b.name).join(", ")
+    );
+  }
+
   result.total = normalized.length;
+  result.excluded = excluded.length;
 
   for (const b of normalized) {
     try {
@@ -157,16 +175,13 @@ export async function syncBrawlerData(
   }
   return result;
 }
-
 import { getTier } from "@/lib/constants";
-
 // Counter matchups
 // ---------------------------------------------------------------------------
 export interface MatchupSyncResult {
   total: number;
   errors: string[];
 }
-
 function stableRand(seed: string): number {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) {
@@ -175,7 +190,6 @@ function stableRand(seed: string): number {
   }
   return ((h >>> 0) % 100000) / 100000;
 }
-
 function computeMatchupScore(
   attackerName: string,
   attackerType: BrawlerType,
@@ -201,7 +215,6 @@ function computeMatchupScore(
     reason: "Neutral matchup, depends on skill and positioning",
   };
 }
-
 export async function syncCounterMatchups(
   prisma: PrismaClient
 ): Promise<MatchupSyncResult> {
@@ -242,7 +255,6 @@ export async function syncCounterMatchups(
   }
   return result;
 }
-
 // Map brawler stats (placeholder rows for brawlers missing one on each map;
 // real rates get filled in later by stat-aggregator.)
 // ---------------------------------------------------------------------------

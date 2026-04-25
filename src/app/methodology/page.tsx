@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 /**
  * /methodology
@@ -15,24 +16,33 @@ import Link from "next/link";
  * Source of truth for the prose is HOW-OUR-STATS-WORK.md in the repo
  * root; this page should stay in sync with that doc.
  */
-
 type View = "technical" | "simple";
 
 export default function MethodologyPage() {
   const [view, setView] = useState<View>("technical");
-
   return (
     <div>
-      {/* Header + toggle */}
+      {/* Header + toggle. Eagle heraldic mark (brawlgglogo2) sits to the
+          left of the heading — the methodology page is the "official
+          statement" surface, so the heraldic mark fits better here than
+          the primary bust mark used on the main nav. No frame around it;
+          the PNG transparency IS the treatment. */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-medium mb-1">How our stats work</h1>
-          <p className="text-sm text-text-secondary">
-            Exactly where every number on this site comes from and how
-            it's computed
-          </p>
+        <div className="flex items-center gap-4">
+          <Image
+            src="/brawlgglogo2.png"
+            alt="Apollo Meta methodology"
+            width={150}
+            height={150}
+          />
+          <div>
+            <h1 className="text-lg font-medium mb-1">How our stats work</h1>
+            <p className="text-sm text-text-secondary">
+              Exactly where every number on this site comes from and how
+              it's computed
+            </p>
+          </div>
         </div>
-
         {/* Toggle — Technical / Simple */}
         <div
           className="inline-flex rounded-lg border border-border overflow-hidden self-start sm:self-end"
@@ -72,9 +82,7 @@ export default function MethodologyPage() {
           </button>
         </div>
       </div>
-
       {view === "technical" ? <TechnicalView /> : <SimpleView />}
-
       {/* Footer links */}
       <div className="mt-8 pt-6 border-t border-border flex flex-wrap gap-4 text-sm">
         <Link
@@ -93,13 +101,11 @@ export default function MethodologyPage() {
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // TECHNICAL VIEW
 // ---------------------------------------------------------------------------
 // Full pipeline explanation — for people who want to know exactly how
 // the math works. Keep in sync with HOW-OUR-STATS-WORK.md.
-
 function TechnicalView() {
   return (
     <div className="space-y-6">
@@ -108,7 +114,6 @@ function TechnicalView() {
         from actual top-player games, not made-up numbers. Here's how
         it flows from raw API data to the stats you see in the UI.
       </Intro>
-
       <Section title="Step 1 — Harvest">
         <p>
           A harvester script pulls the top 200 players from 5 regional
@@ -139,7 +144,6 @@ function TechnicalView() {
           append-only — we never edit or delete this data.
         </p>
       </Section>
-
       <Section title="Step 2 — Aggregate into two tables">
         <p>
           The aggregator writes to <em>two</em> tables, and the split
@@ -172,7 +176,6 @@ function TechnicalView() {
           still real competitive data.
         </p>
       </Section>
-
       <Section title="Step 2.5 — Win rate shrinkage">
         <p>
           Raw win rates lie when samples are small. A brawler with a
@@ -197,7 +200,6 @@ function TechnicalView() {
           and small samples don't produce misleading outliers there.
         </p>
       </Section>
-
       <Section title="Step 2.6 — Tier assignment">
         <p>
           Tiers are the loudest badge on the site, so they need to
@@ -221,7 +223,6 @@ function TechnicalView() {
           everyone auto-promotes or auto-demotes as their data moves.
         </p>
       </Section>
-
       <Section title="Step 3 — Per-map ranking (Wilson score)">
         <p>
           Per-map rankings don't sort by raw win rate — they sort by
@@ -233,7 +234,6 @@ function TechnicalView() {
           trust. Same math Reddit uses to rank comments.
         </p>
       </Section>
-
       <Section title="Step 3.5 — Map pick callouts">
         <p>
           Three cards on every map detail page, picked live from the
@@ -252,7 +252,6 @@ function TechnicalView() {
           third.
         </p>
       </Section>
-
       <Section title="Step 4 — Counter engine">
         <p>
           Brawlers are typed: lane, tank, assassin, thrower, sniper.
@@ -280,7 +279,6 @@ function TechnicalView() {
           once the schema captures all 6 participants per battle.
         </p>
       </Section>
-
       <Section title="Step 5 — Draft engine">
         <p>
           The draft simulator tracks ban/pick state for both teams,
@@ -291,7 +289,6 @@ function TechnicalView() {
           the enemy team's. Positive means you're favored.
         </p>
       </Section>
-
       <Section title="What each dashboard panel means">
         <SubSection title="Top in meta (left panel)">
           <p>
@@ -316,7 +313,6 @@ function TechnicalView() {
           </p>
         </SubSection>
       </Section>
-
       <Section title="What we're honest about">
         <SubSection title="No ban data">
           <p>
@@ -350,7 +346,6 @@ function TechnicalView() {
           </p>
         </SubSection>
       </Section>
-
       <Section title="How to verify any of this yourself">
         <List
           items={[
@@ -382,7 +377,6 @@ function TechnicalView() {
           ]}
         />
       </Section>
-
       <Section title="Why top players?">
         <p>
           Leaderboard players play the actual competitive meta. They
@@ -396,13 +390,11 @@ function TechnicalView() {
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // SIMPLE VIEW
 // ---------------------------------------------------------------------------
 // Plain-English explainer for casual players. Same structure as the
 // technical view but without math, code, or schema details.
-
 function SimpleView() {
   return (
     <div className="space-y-6">
@@ -411,7 +403,6 @@ function SimpleView() {
         stats — not guesses, not opinions. Here's how everything works,
         in plain English.
       </Intro>
-
       <Section title="Where the data comes from">
         <p>We collect data from:</p>
         <List
@@ -427,7 +418,6 @@ function SimpleView() {
           Real competitive play.
         </p>
       </Section>
-
       <Section title="Step 1 — Collecting matches">
         <List
           items={[
@@ -445,7 +435,6 @@ function SimpleView() {
           level.
         </p>
       </Section>
-
       <Section title="Step 2 — Turning matches into stats">
         <p>From all those matches, we calculate:</p>
         <List
@@ -463,7 +452,6 @@ function SimpleView() {
           <p>How good a brawler is across all competitive modes.</p>
         </SubSection>
       </Section>
-
       <Section title="Making the stats fair">
         <p>Small samples can be misleading.</p>
         <p>
@@ -482,7 +470,6 @@ function SimpleView() {
           luck.
         </p>
       </Section>
-
       <Section title="Tier system (S, A, B, C)">
         <p>Brawlers are ranked based on performance:</p>
         <List
@@ -499,7 +486,6 @@ function SimpleView() {
           proven results.
         </p>
       </Section>
-
       <Section title="Map rankings">
         <p>We don't just sort by win rate. Instead we ask:</p>
         <p>
@@ -513,7 +499,6 @@ function SimpleView() {
           ]}
         />
       </Section>
-
       <Section title="Pick suggestions (on map pages)">
         <p>Each map shows smart recommendations:</p>
         <SubSection title="Best first pick">
@@ -526,7 +511,6 @@ function SimpleView() {
           <p>Less common picks that still perform very well.</p>
         </SubSection>
       </Section>
-
       <Section title="Counter system">
         <p>The counter tool is based on competitive strategy:</p>
         <List
@@ -545,7 +529,6 @@ function SimpleView() {
         />
         <p>This is game knowledge + data combined.</p>
       </Section>
-
       <Section title="Draft assistant">
         <p>When drafting:</p>
         <List
@@ -556,7 +539,6 @@ function SimpleView() {
           ]}
         />
       </Section>
-
       <Section title="What we're honest about">
         <p>We don't fake anything. Here's what you should know:</p>
         <SubSection title="No ban data">
@@ -574,7 +556,6 @@ function SimpleView() {
           </p>
         </SubSection>
       </Section>
-
       <Section title="Transparency tools">
         <p>
           We provide{" "}
@@ -594,7 +575,6 @@ function SimpleView() {
         />
         <p>If something is wrong, it's fixable — not hidden.</p>
       </Section>
-
       <Section title="Keeping data updated">
         <p>Stats are refreshed regularly:</p>
         <List
@@ -602,7 +582,6 @@ function SimpleView() {
         />
         <p>The meta evolves — and so do the stats.</p>
       </Section>
-
       <Section title="Why this matters">
         <p>Most meta sites:</p>
         <List items={["Guess", "Copy each other", "Or use unclear methods"]} />
@@ -615,7 +594,6 @@ function SimpleView() {
           ]}
         />
       </Section>
-
       <Section title="The goal">
         <p>
           To become the most accurate and trusted source for Brawl
@@ -628,11 +606,9 @@ function SimpleView() {
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Shared presentational components
 // ---------------------------------------------------------------------------
-
 function Intro({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-bg-secondary rounded-xl p-4 text-sm text-text-secondary leading-relaxed">
@@ -640,7 +616,6 @@ function Intro({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 function Section({
   title,
   children,
@@ -657,7 +632,6 @@ function Section({
     </section>
   );
 }
-
 function SubSection({
   title,
   children,
@@ -674,7 +648,6 @@ function SubSection({
     </div>
   );
 }
-
 function List({ items }: { items: React.ReactNode[] }) {
   return (
     <ul className="space-y-1.5">
@@ -690,7 +663,6 @@ function List({ items }: { items: React.ReactNode[] }) {
     </ul>
   );
 }
-
 function Code({ children }: { children: React.ReactNode }) {
   return (
     <code className="bg-bg-tertiary px-1.5 py-0.5 rounded text-[12px] font-mono text-text-primary">
@@ -698,7 +670,6 @@ function Code({ children }: { children: React.ReactNode }) {
     </code>
   );
 }
-
 function CodeBlock({ children }: { children: React.ReactNode }) {
   return (
     <pre className="bg-bg-tertiary rounded-md px-3 py-2 text-[12px] font-mono text-text-primary overflow-x-auto">

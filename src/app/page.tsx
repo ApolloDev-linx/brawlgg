@@ -20,6 +20,40 @@ interface BrawlerSummary {
   impact: number; // winRate × pickRate — meta dominance score
 }
 
+// Two-letter initials for the chip column (PDF dashboard mockup uses
+// these — `Sp Spike`, `Sh Shelly`, etc). Just first two letters of the
+// canonical name with the second letter lowercased; reads cleanly even
+// for "El Primo" → "El", "Mr. P" → "Mr".
+function initials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "??";
+  const first = trimmed[0].toUpperCase();
+  // Skip past spaces / punctuation to find a real second character
+  const rest = trimmed.slice(1).replace(/[^a-zA-Z]/g, "");
+  const second = (rest[0] || trimmed[0]).toLowerCase();
+  return first + second;
+}
+
+// Initials chip — small monospace-feeling badge shown next to brawler
+// names in the right-column bar lists and the Top in meta table.
+// Matches PDF page 1 spec.
+function InitialsChip({ name }: { name: string }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center text-[10px] font-semibold rounded-md border border-border"
+      style={{
+        background: "var(--bg-tertiary)",
+        color: "var(--text-secondary)",
+        width: 26,
+        height: 22,
+        letterSpacing: "-0.02em",
+      }}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
 async function getDashboardData() {
   return cached("dashboard:overview:v2", CACHE_TTL.META, async () => {
     // Reads from BrawlerStat (computed from raw BattleRecord), not from
@@ -106,51 +140,78 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Metric cards */}
+          {/* Metric cards — PDF page 1 spec: uppercase micro labels, larger
+              metric numbers, gold for top-meta brawler, teal for win rate */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <div className="bg-bg-secondary rounded-lg p-4">
-              <div className="text-xs text-text-secondary mb-1">Active brawlers</div>
-              <div className="text-xl font-medium">{summaries.length}</div>
-              <div className="text-[11px] text-text-tertiary">in current meta</div>
+            <div className="bg-bg-secondary rounded-xl p-4">
+              <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
+                Active brawlers
+              </div>
+              <div className="text-2xl font-medium tracking-tight">
+                {summaries.length}
+              </div>
+              <div className="text-[11px] text-text-secondary mt-1">
+                in current meta
+              </div>
             </div>
-            <div className="bg-bg-secondary rounded-lg p-4">
-              <div className="text-xs text-text-secondary mb-1">Avg win rate</div>
-              <div className="text-xl font-medium" style={{ color: "#5DCAA5" }}>
+            <div className="bg-bg-secondary rounded-xl p-4">
+              <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
+                Avg win rate
+              </div>
+              <div
+                className="text-2xl font-medium tracking-tight"
+                style={{ color: "#5DCAA5" }}
+              >
                 {avgWin}%
               </div>
+              <div className="text-[11px] text-text-secondary mt-1">
+                across 7 modes
+              </div>
             </div>
-            <div className="bg-bg-secondary rounded-lg p-4">
-              <div className="text-xs text-text-secondary mb-1">Top meta brawler</div>
-              <div className="text-xl font-medium" style={{ color: "#EF9F27" }}>
+            <div className="bg-bg-secondary rounded-xl p-4">
+              <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
+                Top meta brawler
+              </div>
+              <div
+                className="text-2xl font-medium tracking-tight"
+                style={{ color: "#EF9F27" }}
+              >
                 {topMetaBrawler?.name || "N/A"}
               </div>
-              <div className="text-[11px] text-text-tertiary">
-                {topMetaBrawler ? `${topMetaBrawler.winRate}% WR · ${topMetaBrawler.pickRate}% pick` : ""}
+              <div className="text-[11px] text-text-secondary mt-1">
+                {topMetaBrawler
+                  ? `${topMetaBrawler.winRate}% WR · ${topMetaBrawler.pickRate}% pick`
+                  : ""}
               </div>
             </div>
-            <div className="bg-bg-secondary rounded-lg p-4">
-              <div className="text-xs text-text-secondary mb-1">Maps tracked</div>
-              <div className="text-xl font-medium">{mapCount}</div>
-              <div className="text-[11px] text-text-tertiary">across 7 modes</div>
+            <div className="bg-bg-secondary rounded-xl p-4">
+              <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
+                Maps tracked
+              </div>
+              <div className="text-2xl font-medium tracking-tight">
+                {mapCount}
+              </div>
+              <div className="text-[11px] text-text-secondary mt-1">
+                across 7 modes
+              </div>
             </div>
           </div>
           {/* Main content grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Top in meta — ranked by win × pick (impact / dominance) */}
+            {/* Top in meta — ranked by win × pick (impact / dominance).
+                Adds initials chip column per PDF page 1 mockup. */}
             <div className="bg-bg-primary border border-border rounded-xl p-4">
-              <div className="flex items-baseline justify-between mb-1">
+              <div className="flex items-baseline justify-between mb-3">
                 <div className="text-sm font-medium">Top in meta</div>
-                <div className="text-[10px] text-text-tertiary">
+                <div className="text-[10px] text-text-tertiary uppercase tracking-widest">
                   win × pick
                 </div>
               </div>
-              <div className="text-[11px] text-text-tertiary mb-3">
-                Brawlers shaping competitive play right now
-              </div>
 
-              {/* Header row */}
-              <div className="grid grid-cols-[16px_1fr_28px_48px_48px] gap-2 items-center text-[10px] text-text-tertiary uppercase tracking-wide pb-1.5 border-b border-border">
-                <span className="text-right">#</span>
+              {/* Header row — adds an extra col for the initials chip */}
+              <div className="grid grid-cols-[16px_28px_1fr_28px_48px_48px] gap-2 items-center text-[10px] text-text-tertiary uppercase tracking-wide pb-2 border-b border-border">
+                <span>#</span>
+                <span></span>
                 <span>Brawler</span>
                 <span></span>
                 <span className="text-right">Win</span>
@@ -160,7 +221,7 @@ export default async function DashboardPage() {
               {topMeta.map((b, i) => (
                 <div
                   key={b.id}
-                  className="grid grid-cols-[16px_1fr_28px_48px_48px] gap-2 items-center py-1.5"
+                  className="grid grid-cols-[16px_28px_1fr_28px_48px_48px] gap-2 items-center py-2"
                   style={{
                     borderBottom:
                       i < topMeta.length - 1
@@ -168,21 +229,24 @@ export default async function DashboardPage() {
                         : "none",
                   }}
                 >
-                  <span className="text-xs text-text-tertiary text-right">
+                  <span className="text-xs text-text-tertiary font-mono">
                     {i + 1}
                   </span>
+                  <InitialsChip name={b.name} />
                   <span className="text-sm font-medium">{b.name}</span>
                   <span
-                    className="text-xs px-1.5 py-0.5 rounded text-center"
+                    className="text-xs font-semibold rounded-md text-center inline-flex items-center justify-center"
                     style={{
                       background: (TIER_COLORS as any)[b.tier] + "22",
                       color: (TIER_COLORS as any)[b.tier],
+                      width: 22,
+                      height: 22,
                     }}
                   >
                     {b.tier}
                   </span>
                   <span
-                    className="text-sm font-medium text-right"
+                    className="text-sm font-semibold text-right"
                     style={{
                       color: b.winRate > 52
                         ? "#5DCAA5"
@@ -198,13 +262,21 @@ export default async function DashboardPage() {
               ))}
             </div>
             <div className="flex flex-col gap-4">
-              {/* Most picked */}
+              {/* Most picked — bar list with initials chip per PDF mockup.
+                  Bars in accent-blue (sniper-color, but used here as the
+                  "pick" semantic). */}
               <div className="bg-bg-primary border border-border rounded-xl p-4">
                 <div className="text-sm font-medium mb-3">Most picked</div>
                 {topPicked.map((b) => (
-                  <div key={b.id} className="flex items-center gap-2 mb-2">
-                    <span className="text-xs flex-1">{b.name}</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-bg-tertiary">
+                  <div
+                    key={b.id}
+                    className="grid grid-cols-[26px_70px_1fr_44px] items-center gap-3 py-1.5"
+                  >
+                    <InitialsChip name={b.name} />
+                    <span className="text-sm font-medium truncate">
+                      {b.name}
+                    </span>
+                    <div className="h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
                       <div
                         className="h-full rounded-full"
                         style={{
@@ -213,7 +285,7 @@ export default async function DashboardPage() {
                         }}
                       />
                     </div>
-                    <span className="text-xs text-text-secondary w-9 text-right">
+                    <span className="text-xs font-mono text-text-primary text-right">
                       {b.pickRate}%
                     </span>
                   </div>
@@ -225,18 +297,26 @@ export default async function DashboardPage() {
                   who's actually winning the most when they show up.
                   Filtered to real-sample brawlers so a 2-0 curiosity can't
                   top the list. Bar fills based on how far above 48% the
-                  brawler is; 58% maxes the bar. */}
+                  brawler is; 58% maxes the bar. Bars in teal (positive
+                  win-rate semantic) — value is also colored teal to match
+                  the PDF mockup. */}
               <div className="bg-bg-primary border border-border rounded-xl p-4">
                 <div className="flex items-baseline justify-between mb-3">
                   <div className="text-sm font-medium">Highest win rate</div>
-                  <div className="text-[10px] text-text-tertiary">
+                  <div className="text-[10px] text-text-tertiary uppercase tracking-widest">
                     real samples only
                   </div>
                 </div>
                 {topWinRate.map((b) => (
-                  <div key={b.id} className="flex items-center gap-2 mb-2">
-                    <span className="text-xs flex-1">{b.name}</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-bg-tertiary">
+                  <div
+                    key={b.id}
+                    className="grid grid-cols-[26px_70px_1fr_44px] items-center gap-3 py-1.5"
+                  >
+                    <InitialsChip name={b.name} />
+                    <span className="text-sm font-medium truncate">
+                      {b.name}
+                    </span>
+                    <div className="h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
                       <div
                         className="h-full rounded-full"
                         style={{
@@ -245,7 +325,10 @@ export default async function DashboardPage() {
                         }}
                       />
                     </div>
-                    <span className="text-xs text-text-secondary w-9 text-right">
+                    <span
+                      className="text-xs font-mono text-right"
+                      style={{ color: "#5DCAA5" }}
+                    >
                       {b.winRate}%
                     </span>
                   </div>

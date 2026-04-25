@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
@@ -18,22 +19,19 @@ export function Navigation() {
   return (
     <header className="border-b border-border mb-6">
       <div className="max-w-5xl mx-auto px-4">
-        {/* Logo */}
-        <div className="flex items-center gap-3 py-4">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
-            style={{
-              background: "linear-gradient(135deg, #EF9F27, #D85A30)",
-              color: "#fff",
-            }}
-          >
-            AM
-          </div>
+                <div className="flex items-center gap-3 py-4">
+          <Image
+            src="/brawlgglogo.png"
+            alt="Apollo Meta"
+            width={160}
+            height={140}
+            priority
+          />
           <div>
-            <div className="text-base font-medium tracking-tight">
+            <div className="text-sm font-medium tracking-tight">
               Apollo Meta
             </div>
-            <div className="text-[10px] text-text-tertiary tracking-widest uppercase">
+            <div className="text-[10px] text-text-tertiary tracking-widest uppercase mt-0.5">
               Brawl Stars Intelligence
             </div>
           </div>
