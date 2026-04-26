@@ -63,6 +63,7 @@ export async function getAllBrawlerSummaries(
       role: b.role,
       hp: b.hp,
       iconUrl: b.iconUrl,
+      externalId: b.externalId,
       winRate,
       pickRate: s?.pickRate ?? 0,
       banRate: s?.banRate ?? 0,

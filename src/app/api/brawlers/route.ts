@@ -45,6 +45,7 @@ export async function GET() {
         type: b.type,
         hp: b.hp,
         iconUrl: b.iconUrl,
+	externalId: b.externalId,
         winRate: b.winRate,
         pickRate: b.pickRate,
         banRate: b.banRate,

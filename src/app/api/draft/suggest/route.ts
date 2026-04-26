@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       type: b.type as any,
       hp: b.hp,
       iconUrl: b.iconUrl,
+      externalId: b.externalId,
       winRate: b.winRate,
       pickRate: b.pickRate,
       banRate: b.banRate,

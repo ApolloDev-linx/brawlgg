@@ -45,6 +45,7 @@ export async function POST(request: Request) {
         type: b.type as any,
         hp: b.hp,
         iconUrl: b.iconUrl,
+	externalId: b.externalId,
         winRate: Math.round(avgWin * 10) / 10,
         pickRate: Math.round(avgPick * 10) / 10,
         banRate: Math.round(avgBan * 10) / 10,

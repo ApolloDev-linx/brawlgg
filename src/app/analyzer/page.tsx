@@ -19,6 +19,8 @@ async function getAnalyzerData() {
       hp: b.hp,
       winRate: b.winRate,
       pickRate: b.pickRate,
+      iconUrl: string | null,
+  externalId: number | null,
       // safeTier: kept in lockstep with the other pages so the tier
       // distribution chart shows a consistent view of S/A/B/C counts.
       tier: safeTier(b.winRate, b.totalBattles),

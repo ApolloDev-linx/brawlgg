@@ -11,6 +11,7 @@ export interface Brawler {
   type: BrawlerType;
   hp: number;
   iconUrl: string | null;
+  externalId: number | null;
 }
 
 export interface BrawlerWithStats extends Brawler {
