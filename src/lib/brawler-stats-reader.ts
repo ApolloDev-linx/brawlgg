@@ -23,6 +23,7 @@ export interface BrawlerSummary {
   role: string;
   hp: number;
   iconUrl: string | null;
+  externalId: number | null;
   winRate: number;     // shrunk via prior
   pickRate: number;    // raw, no shrinkage
   banRate: number;

@@ -50,6 +50,7 @@ interface BrawlifyMap {
   hash: string;
   version: number;
   disabled?: boolean;
+  imageUrl?: string;
   gameMode?: {
     name?: string;
     scId?: number;
