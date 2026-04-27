@@ -1,3 +1,4 @@
+import { FeaturedCard } from "@/components/dashboard/FeaturedCard";
 import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/redis";
@@ -54,19 +55,23 @@ export default async function DashboardPage() {
   }
   const { summaries, mapCount } = data;
 
-  const topMeta = [...summaries].sort((a, b) => b.impact - a.impact).slice(0, 8);
+ // Top in meta bumped from 8 to 10
+  const topMeta = [...summaries].sort((a, b) => b.impact - a.impact).slice(0, 10);
   const topPicked = [...summaries].sort((a, b) => b.pickRate - a.pickRate).slice(0, 5);
   const topWinRate = [...summaries]
     .filter((b) => b.isReal)
     .sort((a, b) => b.winRate - a.winRate)
     .slice(0, 5);
 
-  const avgWin = summaries.length > 0
-    ? Math.round((summaries.reduce((s, b) => s + b.winRate, 0) / summaries.length) * 10) / 10
-    : 0;
+  // Worst brawler — same isReal filter as Highest WR so a 5-battle
+  // brawler doesn't accidentally get pinned to the wall of shame.
+  // Sorted ascending by winRate; bottom of the real-sample list wins.
+  const worstBrawler =
+    [...summaries]
+      .filter((b) => b.isReal)
+      .sort((a, b) => a.winRate - b.winRate)[0] || null;
 
   const topMetaBrawler = topMeta[0];
-
   return (
     <div>
       <div className="mb-5">
@@ -100,21 +105,20 @@ export default async function DashboardPage() {
                 in current meta
               </div>
             </div>
-            <div className="bg-bg-secondary rounded-xl p-4">
-              <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
-                Avg win rate
-              </div>
-              <div
-                className="text-2xl font-medium tracking-tight"
-                style={{ color: "#5DCAA5" }}
-              >
-                {avgWin}%
-              </div>
-              <div className="text-[11px] text-text-secondary mt-1">
-                across 7 modes
-              </div>
-            </div>
-            <div className="bg-bg-secondary rounded-xl p-4 flex flex-col">
+            <FeaturedCard
+              worstBrawler={
+                worstBrawler
+                  ? {
+                      id: worstBrawler.id,
+                      name: worstBrawler.name,
+                      iconUrl: worstBrawler.iconUrl,
+                      externalId: worstBrawler.externalId,
+                      winRate: worstBrawler.winRate,
+                      pickRate: worstBrawler.pickRate,
+                    }
+                  : null
+              }
+            />            <div className="bg-bg-secondary rounded-xl p-4 flex flex-col">
               <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
                 Top meta brawler
               </div>
@@ -257,14 +261,8 @@ export default async function DashboardPage() {
               </div>
 
               {/* Highest win rate */}
-              <div className="bg-bg-primary border border-border rounded-xl p-4">
-                <div className="flex items-baseline justify-between mb-3">
-                  <div className="text-sm font-medium">Highest win rate</div>
-                  <div className="text-[10px] text-text-tertiary uppercase tracking-widest">
-                    real samples only
-                  </div>
-                </div>
-                {topWinRate.map((b) => (
+             <div className="bg-bg-primary border border-border rounded-xl p-4">
+                <div className="text-sm font-medium mb-3">Highest win rate</div>                {topWinRate.map((b) => (
                   <div
                     key={b.id}
                     className="grid grid-cols-[26px_70px_1fr_44px] items-center gap-3 py-1.5"
