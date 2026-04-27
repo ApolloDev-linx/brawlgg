@@ -1,3 +1,4 @@
+import { getFeaturedData } from "@/services/featured-data";
 import { FeaturedCard } from "@/components/dashboard/FeaturedCard";
 import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 import { prisma } from "@/lib/prisma";
@@ -25,7 +26,8 @@ interface BrawlerSummary {
 }
 
 async function getDashboardData() {
-  return cached("dashboard:overview:v3", CACHE_TTL.META, async () => {
+  // Cache key bumped to v4 since the shape now includes `featured`.
+  return cached("dashboard:overview:v4", CACHE_TTL.META, async () => {
     const brawlers = await getAllBrawlerSummaries();
     const summaries: BrawlerSummary[] = brawlers.map((b) => ({
       id: b.id,
@@ -41,21 +43,30 @@ async function getDashboardData() {
       isReal: b.isReal,
       impact: Math.round((b.winRate * b.pickRate) / 100 * 100) / 100,
     }));
-    const mapCount = await prisma.map.count({ where: { active: true } });
-    return { summaries, mapCount };
+    // Map count + featured data fetched in parallel — featured has its
+    // own 30min cache inside getFeaturedData() so it's cheap on misses.
+    const [mapCount, featured] = await Promise.all([
+      prisma.map.count({ where: { active: true } }),
+      getFeaturedData(),
+    ]);
+    return { summaries, mapCount, featured };
   });
 }
 
 export default async function DashboardPage() {
-  let data: { summaries: BrawlerSummary[]; mapCount: number };
+  let data: Awaited<ReturnType<typeof getDashboardData>>;
   try {
     data = await getDashboardData();
   } catch {
-    data = { summaries: [], mapCount: 0 };
+    data = {
+      summaries: [],
+      mapCount: 0,
+      featured: { player: null, clubs: [] },
+    };
   }
-  const { summaries, mapCount } = data;
+  const { summaries, mapCount, featured } = data;
 
- // Top in meta bumped from 8 to 10
+  // Top in meta bumped from 8 to 10
   const topMeta = [...summaries].sort((a, b) => b.impact - a.impact).slice(0, 10);
   const topPicked = [...summaries].sort((a, b) => b.pickRate - a.pickRate).slice(0, 5);
   const topWinRate = [...summaries]
@@ -72,6 +83,7 @@ export default async function DashboardPage() {
       .sort((a, b) => a.winRate - b.winRate)[0] || null;
 
   const topMetaBrawler = topMeta[0];
+
   return (
     <div>
       <div className="mb-5">
@@ -105,7 +117,10 @@ export default async function DashboardPage() {
                 in current meta
               </div>
             </div>
+
             <FeaturedCard
+              player={featured.player}
+              clubs={featured.clubs}
               worstBrawler={
                 worstBrawler
                   ? {
@@ -118,7 +133,9 @@ export default async function DashboardPage() {
                     }
                   : null
               }
-            />            <div className="bg-bg-secondary rounded-xl p-4 flex flex-col">
+            />
+
+            <div className="bg-bg-secondary rounded-xl p-4 flex flex-col">
               <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
                 Top meta brawler
               </div>
@@ -146,6 +163,7 @@ export default async function DashboardPage() {
                 <div className="text-2xl font-medium tracking-tight">N/A</div>
               )}
             </div>
+
             <div className="bg-bg-secondary rounded-xl p-4">
               <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
                 Maps tracked
@@ -261,8 +279,9 @@ export default async function DashboardPage() {
               </div>
 
               {/* Highest win rate */}
-             <div className="bg-bg-primary border border-border rounded-xl p-4">
-                <div className="text-sm font-medium mb-3">Highest win rate</div>                {topWinRate.map((b) => (
+              <div className="bg-bg-primary border border-border rounded-xl p-4">
+                <div className="text-sm font-medium mb-3">Highest win rate</div>
+                {topWinRate.map((b) => (
                   <div
                     key={b.id}
                     className="grid grid-cols-[26px_70px_1fr_44px] items-center gap-3 py-1.5"

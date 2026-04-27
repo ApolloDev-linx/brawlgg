@@ -1,46 +1,37 @@
 /**
  * Featured card configuration for the dashboard.
  *
- * The Featured card on the homepage rotates through up to three
- * states, in this order:
+ * Enter player and club tags below — names, trophies, and member
+ * counts are fetched live from the Brawl Stars API at request time
+ * and cached for 30 minutes.
  *
- *   1. Player of the month  — handpicked, edit PLAYER_OF_MONTH below
- *   2. Featured clubs       — handpicked, edit FEATURED_CLUBS below
- *   3. Worst brawler        — auto-computed from BrawlerStat
+ * If BRAWL_STARS_API_KEY isn't set, or the API errors, the card
+ * gracefully falls back to displaying just the tag + blurb.
  *
- * To swap who's featured, edit the values below and redeploy. The
- * card auto-rotates every ~7 seconds and pauses on hover.
+ * Slides:
+ *   1. Player of the month   — PLAYER_OF_MONTH (single)
+ *   2. Featured clubs        — FEATURED_CLUBS (up to 3 shown)
+ *   3. Worst brawler         — auto-computed from BrawlerStat
  *
- * Set PLAYER_OF_MONTH to null or FEATURED_CLUBS to [] to skip that
- * slide entirely — rotation only cycles through populated states.
+ * Set PLAYER_OF_MONTH to null or FEATURED_CLUBS to [] to skip
+ * that slide entirely. Auto-rotates every 7 seconds.
  */
 
-export interface FeaturedPlayer {
-  name: string;
+export interface FeaturedPlayerConfig {
   tag: string;          // e.g. "#2QPRGGV9C"
   blurb?: string;       // short why-they're-featured line
-  trophies?: number;
 }
 
-export interface FeaturedClub {
-  name: string;
+export interface FeaturedClubConfig {
   tag: string;          // e.g. "#2VR8PJ8L"
-  blurb?: string;       // optional short tagline
+  blurb?: string;       // optional tagline
 }
 
-// Set to null to skip this slide
-export const PLAYER_OF_MONTH: FeaturedPlayer | null = {
-  name: "GG|Apollo",
+export const PLAYER_OF_MONTH: FeaturedPlayerConfig | null = {
   tag: "#L9QCVP22",
   blurb: "Use our website to be randomly chosen",
-  trophies: 90544,
 };
 
-// Empty array to skip this slide
-export const FEATURED_CLUBS: FeaturedClub[] = [
-  {
-    name: "GG Empire",
-    tag: "#2VRJ9YUJ9",
-    blurb: "Chosen by Apollo Meta",
-  },
+export const FEATURED_CLUBS: FeaturedClubConfig[] = [
+  { tag: "#2VRJ9YUJ9", blurb: "Chosen By Apollo Meta" },
 ];

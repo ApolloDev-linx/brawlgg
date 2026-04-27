@@ -2,12 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { BrawlerPortrait } from "@/components/BrawlerPortrait";
-import {
-  PLAYER_OF_MONTH,
-  FEATURED_CLUBS,
-  type FeaturedPlayer,
-  type FeaturedClub,
-} from "@/lib/featured";
+import type {
+  ResolvedPlayer,
+  ResolvedClub,
+} from "@/services/featured-data";
 
 interface WorstBrawler {
   id: string;
@@ -24,24 +22,23 @@ const FADE_MS = 200;
 type SlideKind = "player" | "clubs" | "worst";
 
 export function FeaturedCard({
+  player,
+  clubs,
   worstBrawler,
 }: {
+  player: ResolvedPlayer | null;
+  clubs: ResolvedClub[];
   worstBrawler: WorstBrawler | null;
 }) {
-  // Build active slides only from populated sources. If you haven't
-  // configured PLAYER_OF_MONTH yet, that slide is silently skipped —
-  // rotation just cycles whatever IS populated.
   const slides: SlideKind[] = [];
-  if (PLAYER_OF_MONTH) slides.push("player");
-  if (FEATURED_CLUBS.length > 0) slides.push("clubs");
+  if (player) slides.push("player");
+  if (clubs.length > 0) slides.push("clubs");
   if (worstBrawler) slides.push("worst");
 
   const [index, setIndex] = useState(0);
   const [opacity, setOpacity] = useState(1);
   const [paused, setPaused] = useState(false);
 
-  // Cross-fade transition: fade out → swap content → fade in.
-  // Pass `target` to jump directly (dot click); omit to advance +1.
   const advance = useCallback(
     (target?: number) => {
       if (slides.length <= 1) return;
@@ -62,8 +59,6 @@ export function FeaturedCard({
     return () => window.clearInterval(timer);
   }, [paused, advance, slides.length]);
 
-  // Defensive: if every source returned empty, render a quiet
-  // placeholder rather than crashing the metric row layout.
   if (slides.length === 0) {
     return (
       <div className="bg-bg-secondary rounded-xl p-4">
@@ -87,18 +82,15 @@ export function FeaturedCard({
         className="flex-1 transition-opacity"
         style={{ opacity, transitionDuration: `${FADE_MS}ms` }}
       >
-        {current === "player" && PLAYER_OF_MONTH && (
-          <PlayerSlide player={PLAYER_OF_MONTH} />
-        )}
-        {current === "clubs" && FEATURED_CLUBS.length > 0 && (
-          <ClubsSlide clubs={FEATURED_CLUBS} />
+        {current === "player" && player && <PlayerSlide player={player} />}
+        {current === "clubs" && clubs.length > 0 && (
+          <ClubsSlide clubs={clubs} />
         )}
         {current === "worst" && worstBrawler && (
           <WorstSlide brawler={worstBrawler} />
         )}
       </div>
 
-      {/* Pagination dots — only render when 2+ slides */}
       {slides.length > 1 && (
         <div className="flex gap-1 mt-2">
           {slides.map((_, i) => (
@@ -126,7 +118,7 @@ export function FeaturedCard({
   );
 }
 
-function PlayerSlide({ player }: { player: FeaturedPlayer }) {
+function PlayerSlide({ player }: { player: ResolvedPlayer }) {
   return (
     <>
       <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
@@ -143,6 +135,11 @@ function PlayerSlide({ player }: { player: FeaturedPlayer }) {
         {player.trophies !== undefined &&
           ` · ${player.trophies.toLocaleString()} 🏆`}
       </div>
+      {player.clubName && (
+        <div className="text-[11px] text-text-tertiary mt-0.5 truncate">
+          {player.clubName}
+        </div>
+      )}
       {player.blurb && (
         <div className="text-[11px] text-text-secondary mt-1 leading-snug">
           {player.blurb}
@@ -152,14 +149,13 @@ function PlayerSlide({ player }: { player: FeaturedPlayer }) {
   );
 }
 
-function ClubsSlide({ clubs }: { clubs: FeaturedClub[] }) {
-  // Show up to 3 — enough for variety, doesn't overflow the card height.
+function ClubsSlide({ clubs }: { clubs: ResolvedClub[] }) {
   return (
     <>
       <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
         Featured clubs
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1.5">
         {clubs.slice(0, 3).map((c) => (
           <div key={c.tag} className="min-w-0">
             <div
@@ -170,7 +166,9 @@ function ClubsSlide({ clubs }: { clubs: FeaturedClub[] }) {
             </div>
             <div className="text-[10px] text-text-tertiary font-mono truncate">
               {c.tag}
-              {c.blurb && ` · ${c.blurb}`}
+              {c.memberCount !== undefined && ` · ${c.memberCount}/30`}
+              {c.trophies !== undefined &&
+                ` · ${c.trophies.toLocaleString()}🏆`}
             </div>
           </div>
         ))}
@@ -180,8 +178,6 @@ function ClubsSlide({ clubs }: { clubs: FeaturedClub[] }) {
 }
 
 function WorstSlide({ brawler }: { brawler: WorstBrawler }) {
-  // Mirror the "Top meta brawler" layout — portrait + name + stats —
-  // but in the loss palette so it reads instantly as the inverse card.
   return (
     <>
       <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">

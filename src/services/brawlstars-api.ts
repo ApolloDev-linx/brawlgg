@@ -43,6 +43,13 @@ async function apiFetch<T>(path: string): Promise<T> {
   return res.json();
 }
 
+
+
+
+
+
+
+
 export interface BSPlayer {
   tag: string;
   name: string;
@@ -79,6 +86,33 @@ export interface BSLeaderboardPlayer {
   rank: number;
   club?: { name: string };
 }
+
+
+
+export interface BSClubMember {
+  tag: string;
+  name: string;
+  trophies: number;
+  role: string;
+}
+
+export interface BSClub {
+  tag: string;
+  name: string;
+  description: string;
+  type: string;             // "open" | "inviteOnly" | "closed"
+  badgeId: number;
+  requiredTrophies: number;
+  trophies: number;
+  members: BSClubMember[];
+}
+
+export async function fetchClub(tag: string): Promise<BSClub> {
+  const encoded = encodeURIComponent("#" + normalizeTag(tag));
+  return apiFetch<BSClub>(`/clubs/${encoded}`);
+}
+
+
 
 export async function fetchPlayer(tag: string): Promise<BSPlayer> {
   const encoded = encodeURIComponent("#" + normalizeTag(tag));
