@@ -103,7 +103,6 @@ export function MapList({
                 size="card"
                 className="rounded-none"
               />
-
               <div className="p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xs font-mono bg-bg-secondary px-1.5 py-0.5 rounded text-text-tertiary">
@@ -116,7 +115,6 @@ export function MapList({
                     </div>
                   </div>
                 </div>
-
                 {/* Top 5 brawler portraits */}
                 <div className="flex gap-1">
                   {map.brawlerStats.slice(0, 5).map((s) => (
@@ -129,7 +127,6 @@ export function MapList({
                     />
                   ))}
                 </div>
-
                 {topBrawler && (
                   <div className="text-[11px] text-text-tertiary mt-2">
                     Best: {topBrawler.name}{" "}
@@ -182,7 +179,6 @@ function MapDetail({
   const firstPick = pickFirstPick(stats);
   const safePick = pickSafest(stats);
   const riskPick = pickHighRiskHighReward(stats);
-  const barFill = (wr: number) => Math.max(0, Math.min(100, ((wr - 40) / 20) * 100));
 
   return (
     <div>
@@ -263,7 +259,7 @@ function MapDetail({
         <div className="text-sm font-medium mb-3">
           Top brawlers on {map.name}
         </div>
-        <div className="grid grid-cols-[20px_28px_28px_1fr_120px_140px_56px] gap-3 items-center text-[10px] text-text-tertiary uppercase tracking-widest pb-2 border-b border-border">
+        <div className="grid grid-cols-[20px_28px_28px_1fr_120px_60px_56px] gap-3 items-center text-[10px] text-text-tertiary uppercase tracking-widest pb-2 border-b border-border">
           <span>#</span>
           <span></span>
           <span>Brawler</span>
@@ -275,7 +271,7 @@ function MapDetail({
         {stats.map((s, i) => (
           <div
             key={s.id}
-            className="grid grid-cols-[20px_28px_28px_1fr_120px_140px_56px] gap-3 items-center py-2"
+            className="grid grid-cols-[20px_28px_28px_1fr_120px_60px_56px] gap-3 items-center py-2"
             style={{
               borderBottom:
                 i < stats.length - 1
@@ -313,33 +309,19 @@ function MapDetail({
             >
               {(TYPE_LABELS as any)[s.brawler.type] || s.brawler.type}
             </span>
-            <div className="flex items-center gap-2 justify-end">
-              <span
-                className="inline-block h-1 rounded-full bg-bg-tertiary overflow-hidden"
-                style={{ width: 60 }}
-              >
-                <span
-                  className="block h-full rounded-full"
-                  style={{
-                    width: `${barFill(s.winRate)}%`,
-                    background: (TYPE_COLORS as any)[s.brawler.type],
-                  }}
-                />
-              </span>
-              <span
-                className="text-sm font-semibold font-mono"
-                style={{
-                  color:
-                    s.winRate > 53
-                      ? "#5DCAA5"
-                      : s.winRate < 48
-                        ? "#F09595"
-                        : "var(--text-primary)",
-                }}
-              >
-                {s.winRate}%
-              </span>
-            </div>
+            <span
+              className="text-sm font-semibold font-mono text-right"
+              style={{
+                color:
+                  s.winRate > 53
+                    ? "#5DCAA5"
+                    : s.winRate < 48
+                      ? "#F09595"
+                      : "var(--text-primary)",
+              }}
+            >
+              {s.winRate}%
+            </span>
             <span className="text-sm text-right text-text-secondary font-mono">
               {s.pickRate}%
             </span>
