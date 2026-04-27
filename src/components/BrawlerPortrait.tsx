@@ -11,9 +11,11 @@ import { LOCAL_PORTRAITS } from "@/lib/local-portraits";
  *   0. iconUrl from the Brawler row (populated by brawler-sync from
  *      Brawlify's `imageUrl2 || imageUrl`). If null, fall through to
  *      the constructed CDN URL using externalId.
- *   1. Local override at /public/brawler-portraits/{slug}.png — only
+ *   1. Local override at /public/brawler-portraits/{filename} — only
  *      attempted for brawlers in LOCAL_PORTRAITS so we don't fire 404s
  *      for every row in the dashboard. Managed by scripts/add-portrait.ts.
+ *      Registry stores filename (with extension) so we can serve any of
+ *      png/jpg/webp without the component having to guess.
  *   2. Initials chip — same look as before, so missing-portrait rows
  *      still render cleanly instead of showing a broken-image icon.
  *
@@ -74,8 +76,9 @@ function buildCandidateUrls(
   // Stage 1 — local override. Only added if the brawler is registered;
   // otherwise we'd fire a 404 for every brawler in every list.
   const slug = slugify(name);
-  if (LOCAL_PORTRAITS.has(slug)) {
-    urls.push(`/brawler-portraits/${slug}.png`);
+  const filename = LOCAL_PORTRAITS.get(slug);
+  if (filename) {
+    urls.push(`/brawler-portraits/${filename}`);
   }
 
   return urls;
