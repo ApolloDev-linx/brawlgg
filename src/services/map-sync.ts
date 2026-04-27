@@ -192,7 +192,10 @@ const internalMode = m.gameMode?.name?.toUpperCase().replace(/ /g, "-");
       if (existing) {
         await prisma.map.update({
           where: { id: existing.id },
-          data: { active: isActive },
+          data: {
+            active: isActive,
+            imageUrl: m.imageUrl || null, // Brawlify CDN map render
+          },
         });
         result.updated++;
       } else {
@@ -201,6 +204,7 @@ const internalMode = m.gameMode?.name?.toUpperCase().replace(/ /g, "-");
             name: normalizedName,
             gameModeId: modeId,
             active: isActive,
+            imageUrl: m.imageUrl || null,
           },
         });
         result.created++;

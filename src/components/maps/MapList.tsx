@@ -8,6 +8,7 @@ import {
   pickHighRiskHighReward,
 } from "@/lib/stats-utils";
 import { BrawlerPortrait } from "@/components/BrawlerPortrait";
+import { MapImage } from "@/components/MapImage";
 
 interface BrawlerStat {
   id: string;
@@ -17,7 +18,7 @@ interface BrawlerStat {
   sampleSize: number;
   isReal: boolean;
   tier: string;
-  pickCategory: string | null; // legacy field — no longer used by the cards
+  pickCategory: string | null;
   brawler: {
     id: string;
     name: string;
@@ -32,6 +33,7 @@ interface BrawlerStat {
 interface MapData {
   id: string;
   name: string;
+  imageUrl: string | null; // NEW — pulled through prisma.map.findMany scalars
   gameMode: { id: string; name: string; icon: string };
   brawlerStats: BrawlerStat[];
 }
@@ -82,8 +84,8 @@ export function MapList({
         ))}
       </div>
 
-      {/* Map grid — original layout: mode tag on left next to map name,
-          top-5 brawler portraits below, "Best:" line at bottom. */}
+      {/* Map grid — image banner at top, then mode/name header,
+          top-5 brawler portrait strip, "Best:" line. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((map) => {
           const topBrawler = map.brawlerStats[0]?.brawler;
@@ -91,41 +93,52 @@ export function MapList({
             <button
               key={map.id}
               onClick={() => setSelectedMap(map)}
-              className="bg-bg-primary border border-border rounded-xl p-4 text-left transition-colors hover:border-border-hover"
+              className="bg-bg-primary border border-border rounded-xl overflow-hidden text-left transition-colors hover:border-border-hover flex flex-col"
             >
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-mono bg-bg-secondary px-1.5 py-0.5 rounded text-text-tertiary">
-                  {MODE_ICONS[map.gameMode.name] || "??"}
-                </span>
-                <div>
-                  <div className="text-sm font-medium">{map.name}</div>
-                  <div className="text-xs text-text-secondary">
-                    {map.gameMode.name}
+              {/* Map image banner */}
+              <MapImage
+                name={map.name}
+                imageUrl={map.imageUrl}
+                modeName={map.gameMode.name}
+                size="card"
+                className="rounded-none"
+              />
+
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs font-mono bg-bg-secondary px-1.5 py-0.5 rounded text-text-tertiary">
+                    {MODE_ICONS[map.gameMode.name] || "??"}
+                  </span>
+                  <div>
+                    <div className="text-sm font-medium">{map.name}</div>
+                    <div className="text-xs text-text-secondary">
+                      {map.gameMode.name}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Top 5 — xs portraits (22px) keep the strip compact */}
-              <div className="flex gap-1">
-                {map.brawlerStats.slice(0, 5).map((s) => (
-                  <BrawlerPortrait
-                    key={s.id}
-                    name={s.brawler.name}
-                    iconUrl={s.brawler.iconUrl}
-                    externalId={s.brawler.externalId}
-                    size="xs"
-                  />
-                ))}
-              </div>
-
-              {topBrawler && (
-                <div className="text-[11px] text-text-tertiary mt-2">
-                  Best: {topBrawler.name}{" "}
-                  <span className="font-mono">
-                    ({map.brawlerStats[0]?.winRate}% WR)
-                  </span>
+                {/* Top 5 brawler portraits */}
+                <div className="flex gap-1">
+                  {map.brawlerStats.slice(0, 5).map((s) => (
+                    <BrawlerPortrait
+                      key={s.id}
+                      name={s.brawler.name}
+                      iconUrl={s.brawler.iconUrl}
+                      externalId={s.brawler.externalId}
+                      size="xs"
+                    />
+                  ))}
                 </div>
-              )}
+
+                {topBrawler && (
+                  <div className="text-[11px] text-text-tertiary mt-2">
+                    Best: {topBrawler.name}{" "}
+                    <span className="font-mono">
+                      ({map.brawlerStats[0]?.winRate}% WR)
+                    </span>
+                  </div>
+                )}
+              </div>
             </button>
           );
         })}
@@ -179,6 +192,16 @@ function MapDetail({
       >
         &larr; Back to maps
       </button>
+
+      {/* Hero banner — full width, ~200px tall */}
+      <div className="mb-5">
+        <MapImage
+          name={map.name}
+          imageUrl={map.imageUrl}
+          modeName={map.gameMode.name}
+          size="hero"
+        />
+      </div>
 
       <div className="flex items-center gap-3 mb-5">
         <span className="text-xs font-mono bg-bg-secondary px-2 py-1 rounded text-text-tertiary">
@@ -272,7 +295,6 @@ function MapDetail({
             >
               {s.tier}
             </span>
-            {/* Portrait — sm (26px) matches dashboard row convention */}
             <BrawlerPortrait
               name={s.brawler.name}
               iconUrl={s.brawler.iconUrl}
