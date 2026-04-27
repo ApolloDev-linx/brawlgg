@@ -8,6 +8,7 @@ import {
   TYPE_LABELS,
   TIER_COLORS,
 } from "@/lib/constants";
+import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 import type { BrawlerWithStats } from "@/types/brawler";
 
 export function CounterPicker({
@@ -80,7 +81,7 @@ export function CounterPicker({
                   if (pick)
                     setEnemyPicks(enemyPicks.filter((_, idx) => idx !== i));
                 }}
-                className="w-20 h-20 rounded-xl flex flex-col items-center justify-center transition-all"
+                className="w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
                 style={{
                   border: `1.5px dashed ${pick ? TYPE_COLORS[pick.type] || "#888" : "var(--border-hover)"}`,
                   background: pick
@@ -91,9 +92,15 @@ export function CounterPicker({
               >
                 {pick ? (
                   <>
-                    <span className="text-sm font-medium">{pick.name}</span>
-                    <span className="text-[10px] text-text-secondary">
-                      {pick.role}
+                    {/* md portrait (36px) sits cleanly inside 80x80 slot */}
+                    <BrawlerPortrait
+                      name={pick.name}
+                      iconUrl={pick.iconUrl}
+                      externalId={pick.externalId}
+                      size="md"
+                    />
+                    <span className="text-[11px] font-medium leading-tight">
+                      {pick.name}
                     </span>
                   </>
                 ) : (
@@ -102,7 +109,6 @@ export function CounterPicker({
               </div>
             );
           })}
-
           {enemyPicks.length < 3 && (
             <button
               onClick={() => setShowPicker(!showPicker)}
@@ -139,6 +145,13 @@ export function CounterPicker({
                   onClick={() => addEnemy(b)}
                   className="p-2 border border-border rounded-lg bg-bg-secondary flex flex-col items-center gap-1 text-center transition-colors hover:border-border-hover"
                 >
+                  {/* md (36px) — fills the 80px tile nicely */}
+                  <BrawlerPortrait
+                    name={b.name}
+                    iconUrl={b.iconUrl}
+                    externalId={b.externalId}
+                    size="md"
+                  />
                   <span className="text-xs font-medium">{b.name}</span>
                   <span
                     className="text-[10px]"
@@ -160,7 +173,6 @@ export function CounterPicker({
             const strongVsNames = enemyPicks
               .filter((e) => COUNTER_MATRIX[c.type]?.strongVs.includes(e.type))
               .map((e) => e.name);
-
             return (
               <div
                 key={c.id}
@@ -175,6 +187,13 @@ export function CounterPicker({
                 <span className="text-xs text-text-tertiary w-4 text-right">
                   {i + 1}
                 </span>
+                {/* sm (26px) — same row scale as dashboard */}
+                <BrawlerPortrait
+                  name={c.name}
+                  iconUrl={c.iconUrl}
+                  externalId={c.externalId}
+                  size="sm"
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{c.name}</span>

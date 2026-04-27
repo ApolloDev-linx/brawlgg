@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { suggestPick, computeAdvantage } from "@/services/draft-engine";
 import { TIER_COLORS, TYPE_COLORS } from "@/lib/constants";
+import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 import type { BrawlerWithStats } from "@/types/brawler";
 import type { DraftState } from "@/types/meta";
 
@@ -53,7 +54,6 @@ export function DraftBoard({
 
   function handlePick(b: BrawlerWithStats) {
     if (done) return;
-
     if (phase === "ban") {
       const newBans = [...bans, b.id];
       setBans(newBans);
@@ -107,7 +107,6 @@ export function DraftBoard({
 
       {/* Teams display */}
       <div className="grid grid-cols-[1fr_auto_1fr] gap-4 mb-5">
-        {/* My team */}
         <div className="bg-bg-primary border border-border rounded-xl p-4">
           <div className="text-xs font-medium mb-2" style={{ color: "#5DCAA5" }}>
             Your team
@@ -115,13 +114,7 @@ export function DraftBoard({
           <div className="flex gap-2">
             {[0, 1, 2].map((i) => {
               const b = myPicks[i] ? brawlerMap.get(myPicks[i]) : null;
-              return (
-                <Slot
-                  key={i}
-                  brawler={b || null}
-                  color="#5DCAA5"
-                />
-              );
+              return <Slot key={i} brawler={b || null} color="#5DCAA5" />;
             })}
           </div>
         </div>
@@ -160,7 +153,6 @@ export function DraftBoard({
           )}
         </div>
 
-        {/* Enemy team */}
         <div className="bg-bg-primary border border-border rounded-xl p-4">
           <div className="text-xs font-medium mb-2" style={{ color: "#F09595" }}>
             Enemy team
@@ -170,13 +162,7 @@ export function DraftBoard({
               const b = enemyPicks[i]
                 ? brawlerMap.get(enemyPicks[i])
                 : null;
-              return (
-                <Slot
-                  key={i}
-                  brawler={b || null}
-                  color="#F09595"
-                />
-              );
+              return <Slot key={i} brawler={b || null} color="#F09595" />;
             })}
           </div>
         </div>
@@ -240,6 +226,13 @@ export function DraftBoard({
               onClick={() => handlePick(b)}
               className="p-2 border border-border rounded-lg bg-bg-secondary flex flex-col items-center gap-1 transition-colors hover:border-border-hover"
             >
+              {/* sm (26px) — fits cleanly in 72px tiles */}
+              <BrawlerPortrait
+                name={b.name}
+                iconUrl={b.iconUrl}
+                externalId={b.externalId}
+                size="sm"
+              />
               <span className="text-xs font-medium">{b.name}</span>
               <span
                 className="text-[10px] px-1 rounded"
@@ -266,8 +259,9 @@ function Slot({
   color: string;
 }) {
   return (
+    // h-20 (was h-[68px]) — bumped to fit portrait + name + winrate without crowding
     <div
-      className="w-16 h-[68px] rounded-lg flex flex-col items-center justify-center"
+      className="w-16 h-20 rounded-lg flex flex-col items-center justify-center gap-0.5"
       style={{
         border: `1.5px dashed ${brawler ? color : "var(--border-hover)"}`,
         background: brawler ? color + "08" : "var(--bg-secondary)",
@@ -275,8 +269,16 @@ function Slot({
     >
       {brawler ? (
         <>
-          <span className="text-xs font-medium">{brawler.name}</span>
-          <span className="text-[10px] text-text-secondary">
+          <BrawlerPortrait
+            name={brawler.name}
+            iconUrl={brawler.iconUrl}
+            externalId={brawler.externalId}
+            size="sm"
+          />
+          <span className="text-[11px] font-medium leading-tight">
+            {brawler.name}
+          </span>
+          <span className="text-[10px] text-text-secondary leading-tight">
             {brawler.winRate}%
           </span>
         </>

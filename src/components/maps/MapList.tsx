@@ -7,6 +7,7 @@ import {
   pickSafest,
   pickHighRiskHighReward,
 } from "@/lib/stats-utils";
+import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 
 interface BrawlerStat {
   id: string;
@@ -23,6 +24,8 @@ interface BrawlerStat {
     role: string;
     type: string;
     hp: number;
+    iconUrl: string | null;
+    externalId: number | null;
   };
 }
 
@@ -37,37 +40,6 @@ interface ModeData {
   id: string;
   name: string;
   icon: string;
-}
-
-// ---------------------------------------------------------------------------
-// Initials helper — matches the dashboard convention. Two-letter chip.
-// ---------------------------------------------------------------------------
-function initials(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "??";
-  const first = trimmed[0].toUpperCase();
-  const rest = trimmed.slice(1).replace(/[^a-zA-Z]/g, "");
-  const second = (rest[0] || trimmed[0]).toLowerCase();
-  return first + second;
-}
-
-function InitialsChip({ name, size = "default" }: { name: string; size?: "default" | "sm" }) {
-  const dims = size === "sm"
-    ? { width: 22, height: 18, fontSize: 9 }
-    : { width: 26, height: 22, fontSize: 10 };
-  return (
-    <span
-      className="inline-flex items-center justify-center font-semibold rounded-md border border-border"
-      style={{
-        background: "var(--bg-tertiary)",
-        color: "var(--text-secondary)",
-        letterSpacing: "-0.02em",
-        ...dims,
-      }}
-    >
-      {initials(name)}
-    </span>
-  );
 }
 
 export function MapList({
@@ -111,8 +83,7 @@ export function MapList({
       </div>
 
       {/* Map grid — original layout: mode tag on left next to map name,
-          top-5 brawler chips below, "Best:" line at bottom. Only the
-          chip styling is upgraded to match the dashboard convention. */}
+          top-5 brawler portraits below, "Best:" line at bottom. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((map) => {
           const topBrawler = map.brawlerStats[0]?.brawler;
@@ -134,10 +105,16 @@ export function MapList({
                 </div>
               </div>
 
-              {/* Top 5 — replaced 3-letter slices with proper initials chips */}
+              {/* Top 5 — xs portraits (22px) keep the strip compact */}
               <div className="flex gap-1">
                 {map.brawlerStats.slice(0, 5).map((s) => (
-                  <InitialsChip key={s.id} name={s.brawler.name} size="sm" />
+                  <BrawlerPortrait
+                    key={s.id}
+                    name={s.brawler.name}
+                    iconUrl={s.brawler.iconUrl}
+                    externalId={s.brawler.externalId}
+                    size="xs"
+                  />
                 ))}
               </div>
 
@@ -189,18 +166,9 @@ function MapDetail({
   onBack: () => void;
 }) {
   const stats = map.brawlerStats;
-
-  // Pick selectors derive callouts from real win/pick/sample data instead
-  // of the legacy `pickCategory` field, which used a banRate threshold we
-  // never had real data for. See stats-utils.ts for thresholds + rationale.
-  // Each can return null — render conditionally so we never fake a callout
-  // the data doesn't support.
   const firstPick = pickFirstPick(stats);
   const safePick = pickSafest(stats);
   const riskPick = pickHighRiskHighReward(stats);
-
-  // Bar scaling: 40% WR = empty bar, 60% WR = full bar. 50% sits at the
-  // midpoint, matching the dashboard's stat bar convention.
   const barFill = (wr: number) => Math.max(0, Math.min(100, ((wr - 40) / 20) * 100));
 
   return (
@@ -224,9 +192,7 @@ function MapDetail({
         </div>
       </div>
 
-      {/* Pick category cards — original 3-card layout. Only the label
-          gets upgraded to uppercase micro-tracking, percentages get
-          mono font. */}
+      {/* Pick category cards */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {firstPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
@@ -269,16 +235,11 @@ function MapDetail({
         )}
       </div>
 
-      {/* Stats table — column order:
-          Rank # / Tier badge / initials chip / name / type pill / WIN bar+% / PICK%.
-          Rank sits flush left of the tier badge in mono font — gives the
-          row a clean numeric anchor without taking its own wide column. */}
+      {/* Stats table */}
       <div className="bg-bg-primary border border-border rounded-xl p-4">
         <div className="text-sm font-medium mb-3">
           Top brawlers on {map.name}
         </div>
-
-        {/* Header — labels align with the data underneath */}
         <div className="grid grid-cols-[20px_28px_28px_1fr_120px_140px_56px] gap-3 items-center text-[10px] text-text-tertiary uppercase tracking-widest pb-2 border-b border-border">
           <span>#</span>
           <span></span>
@@ -288,8 +249,6 @@ function MapDetail({
           <span className="text-right">Win%</span>
           <span className="text-right">Pick%</span>
         </div>
-
-        {/* Rows */}
         {stats.map((s, i) => (
           <div
             key={s.id}
@@ -301,12 +260,9 @@ function MapDetail({
                   : "none",
             }}
           >
-            {/* Rank — mono, tertiary text, sits flush left of the tier */}
             <span className="text-xs text-text-tertiary font-mono">
               {i + 1}
             </span>
-
-            {/* Tier — square 22×22 badge, leftmost */}
             <span
               className="text-xs font-semibold rounded-md w-[22px] h-[22px] inline-flex items-center justify-center"
               style={{
@@ -316,16 +272,16 @@ function MapDetail({
             >
               {s.tier}
             </span>
-
-            {/* Initials chip */}
-            <InitialsChip name={s.brawler.name} />
-
-            {/* Name */}
+            {/* Portrait — sm (26px) matches dashboard row convention */}
+            <BrawlerPortrait
+              name={s.brawler.name}
+              iconUrl={s.brawler.iconUrl}
+              externalId={s.brawler.externalId}
+              size="sm"
+            />
             <span className="text-sm font-medium truncate">
               {s.brawler.name}
             </span>
-
-            {/* Type pill */}
             <span
               className="text-[11px] font-medium px-2 py-0.5 rounded-md w-fit"
               style={{
@@ -335,8 +291,6 @@ function MapDetail({
             >
               {(TYPE_LABELS as any)[s.brawler.type] || s.brawler.type}
             </span>
-
-            {/* Win — mini stat bar + percentage in mono */}
             <div className="flex items-center gap-2 justify-end">
               <span
                 className="inline-block h-1 rounded-full bg-bg-tertiary overflow-hidden"
@@ -364,8 +318,6 @@ function MapDetail({
                 {s.winRate}%
               </span>
             </div>
-
-            {/* Pick */}
             <span className="text-sm text-right text-text-secondary font-mono">
               {s.pickRate}%
             </span>

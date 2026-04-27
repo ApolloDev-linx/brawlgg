@@ -2,7 +2,8 @@
 
 import { useState, useMemo } from "react";
 import { TYPE_COLORS, TYPE_LABELS, TIER_COLORS, COUNTER_MATRIX } from "@/lib/constants";
-import type { BrawlerType, Tier } from "@/types/brawler";
+import { BrawlerPortrait } from "@/components/BrawlerPortrait";
+import type { BrawlerType } from "@/types/brawler";
 
 interface BrawlerData {
   id: string;
@@ -13,6 +14,8 @@ interface BrawlerData {
   winRate: number;
   pickRate: number;
   tier: string;
+  iconUrl: string | null;
+  externalId: number | null;
 }
 
 export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
@@ -84,7 +87,6 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
             </div>
           ))}
         </div>
-
         <div className="bg-bg-primary border border-border rounded-xl p-4">
           <div className="text-sm font-medium mb-3">Tier distribution</div>
           {tierDist.map(([tier, count]) => (
@@ -124,7 +126,7 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
             <button
               key={b.id}
               onClick={() => setSelected(b)}
-              className="px-2 py-1 rounded-md text-xs flex items-center gap-1 transition-all"
+              className="px-2 py-1 rounded-md text-xs flex items-center gap-1.5 transition-all"
               style={{
                 border: `1px solid ${selected?.id === b.id ? (TYPE_COLORS as any)[b.type] : "var(--border-color)"}`,
                 background:
@@ -133,6 +135,13 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
                     : "var(--bg-secondary)",
               }}
             >
+              {/* xs (22px) — keeps the picker chips compact */}
+              <BrawlerPortrait
+                name={b.name}
+                iconUrl={b.iconUrl}
+                externalId={b.externalId}
+                size="xs"
+              />
               {b.name}
             </button>
           ))}
@@ -141,6 +150,14 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
         {selected && (
           <div className="border-t border-border pt-4">
             <div className="flex items-center gap-3 mb-4">
+              {/* lg (56px) — anchors the deep-dive header. Was an empty
+                  flex container in the old version, finally filled. */}
+              <BrawlerPortrait
+                name={selected.name}
+                iconUrl={selected.iconUrl}
+                externalId={selected.externalId}
+                size="lg"
+              />
               <div>
                 <div className="text-base font-medium">{selected.name}</div>
                 <div className="flex gap-2 mt-1">
@@ -170,8 +187,7 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
             </div>
 
             {/* Stats — Ban rate card removed. We have no real ban data
-                from the API, so it was always showing 0%. Grid collapsed
-                from 3 cols to 2. */}
+                from the API, so it was always showing 0%. */}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-bg-secondary rounded-lg p-3">
                 <div className="text-[11px] text-text-secondary">Win rate</div>
@@ -208,9 +224,17 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
                   strongAgainst.map((b) => (
                     <div
                       key={b.id}
-                      className="text-xs mb-1 text-text-secondary"
+                      className="flex items-center gap-2 text-xs mb-1.5 text-text-secondary"
                     >
-                      {b.name} ({(TYPE_LABELS as any)[b.type]})
+                      <BrawlerPortrait
+                        name={b.name}
+                        iconUrl={b.iconUrl}
+                        externalId={b.externalId}
+                        size="sm"
+                      />
+                      <span>
+                        {b.name} ({(TYPE_LABELS as any)[b.type]})
+                      </span>
                     </div>
                   ))
                 ) : (
@@ -230,9 +254,17 @@ export function AnalyzerClient({ brawlers }: { brawlers: BrawlerData[] }) {
                   weakAgainst.map((b) => (
                     <div
                       key={b.id}
-                      className="text-xs mb-1 text-text-secondary"
+                      className="flex items-center gap-2 text-xs mb-1.5 text-text-secondary"
                     >
-                      {b.name} ({(TYPE_LABELS as any)[b.type]})
+                      <BrawlerPortrait
+                        name={b.name}
+                        iconUrl={b.iconUrl}
+                        externalId={b.externalId}
+                        size="sm"
+                      />
+                      <span>
+                        {b.name} ({(TYPE_LABELS as any)[b.type]})
+                      </span>
                     </div>
                   ))
                 ) : (
