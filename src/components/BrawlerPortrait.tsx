@@ -1,17 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { LOCAL_PORTRAITS } from "@/lib/local-portraits";
 
 /**
- * Brawler portrait — Brawlify CDN image with graceful initials fallback.
+ * Brawler portrait — Brawlify CDN image with a local override layer
+ * and a graceful initials fallback.
  *
- * Resolution order:
- *   1. iconUrl from the Brawler row (already populated by brawler-sync
- *      from Brawlify's `imageUrl2 || imageUrl`)
- *   2. Constructed: cdn.brawlify.com/brawler-bs/regular/{externalId}.png
- *   3. If image errors (404, network, brawler too new for CDN): show
- *      the initials chip — same look we used pre-portraits, so it
- *      degrades cleanly instead of leaving a broken-image icon.
+ * Resolution chain (each step advances on <img> onError):
+ *   0. iconUrl from the Brawler row (populated by brawler-sync from
+ *      Brawlify's `imageUrl2 || imageUrl`). If null, fall through to
+ *      the constructed CDN URL using externalId.
+ *   1. Local override at /public/brawler-portraits/{slug}.png — only
+ *      attempted for brawlers in LOCAL_PORTRAITS so we don't fire 404s
+ *      for every row in the dashboard. Managed by scripts/add-portrait.ts.
+ *   2. Initials chip — same look as before, so missing-portrait rows
+ *      still render cleanly instead of showing a broken-image icon.
  *
  * Sizes are pinned to a small set of presets so visual rhythm stays
  * consistent across the app. Add a new size by extending SIZE_MAP — do
@@ -21,8 +25,7 @@ import { useState } from "react";
  *   next/image needs static width/height props plus a remotePatterns
  *   entry per host. We already have the latter, but the failure mode of
  *   next/image on a missing CDN is uglier than <img onError>. For 26×26
- *   chips streamed in lists, the LCP wins from next/image are negligible
- *   anyway. Plain img + lazy loading is the right call here.
+ *   chips streamed in lists, the LCP wins from next/image are negligible.
  */
 
 type Size = "xs" | "sm" | "md" | "lg" | "xl";
@@ -44,15 +47,38 @@ function initials(name: string): string {
   return first + second;
 }
 
-function buildPortraitUrl(
+// Same slug rules as scripts/add-portrait.ts — keep these in sync.
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildCandidateUrls(
+  name: string,
   iconUrl: string | null | undefined,
   externalId: number | null | undefined
-): string | null {
-  if (iconUrl) return iconUrl;
-  if (externalId != null) {
-    return `https://cdn.brawlify.com/brawler-bs/regular/${externalId}.png`;
+): string[] {
+  const urls: string[] = [];
+
+  // Stage 0 — primary remote portrait. Prefer the explicit iconUrl,
+  // fall back to constructing the CDN URL from externalId.
+  if (iconUrl) {
+    urls.push(iconUrl);
+  } else if (externalId != null) {
+    urls.push(`https://cdn.brawlify.com/brawler-bs/regular/${externalId}.png`);
   }
-  return null;
+
+  // Stage 1 — local override. Only added if the brawler is registered;
+  // otherwise we'd fire a 404 for every brawler in every list.
+  const slug = slugify(name);
+  if (LOCAL_PORTRAITS.has(slug)) {
+    urls.push(`/brawler-portraits/${slug}.png`);
+  }
+
+  return urls;
 }
 
 export function BrawlerPortrait({
@@ -68,13 +94,14 @@ export function BrawlerPortrait({
   size?: Size;
   className?: string;
 }) {
-  const [errored, setErrored] = useState(false);
-  const url = buildPortraitUrl(iconUrl, externalId);
+  const [stage, setStage] = useState(0);
   const dim = SIZE_MAP[size];
+  const candidates = buildCandidateUrls(name, iconUrl, externalId);
+  const url = candidates[stage] ?? null;
 
   // Fallback path — initials chip styled to match the original
   // InitialsChip exactly, so swap-in is visually transparent on failure.
-  if (errored || !url) {
+  if (!url) {
     return (
       <span
         className={`inline-flex items-center justify-center font-semibold border border-border ${className}`}
@@ -108,10 +135,13 @@ export function BrawlerPortrait({
       title={name}
     >
       <img
+        // Key on stage so React swaps the underlying element on advance,
+        // forcing a fresh load instead of reusing the cached error state.
+        key={stage}
         src={url}
         alt={name}
         loading="lazy"
-        onError={() => setErrored(true)}
+        onError={() => setStage((s) => s + 1)}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
     </span>
