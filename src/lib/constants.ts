@@ -61,6 +61,24 @@ export const TYPE_LABELS: Record<BrawlerType, string> = {
   sniper: "Sniper",
 };
 
+
+export const MODE_COLORS: Record<string, string> = {
+  Knockout: "#EF9F27",       // gold
+  "Brawl Ball": "#5DCAA5",   // teal
+  "Brawl Hockey": "#85B7EB", // blue
+  "Hot Zone": "#F09595",     // red
+  Wipeout: "#F09595",        // red
+  Showdown: "#D85A30",       // coral
+  "Duo Showdown": "#D85A30",
+  "Trio Showdown": "#D85A30",
+  Heist: "#D85A30",          // coral — fire/explosions theme
+  "Brawl Arena": "#7F77DD",  // purple
+  Duels: "#7F77DD",
+  "Gem Grab": "#ED93B1",     // pink — gems
+  Bounty: "#7F77DD",         // purple
+};
+
+
 export const TYPE_COLORS: Record<BrawlerType, string> = {
   lane: "#5DCAA5",
   tank: "#F09595",
