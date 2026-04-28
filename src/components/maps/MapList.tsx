@@ -350,7 +350,6 @@ function MapDetail({
   onBack: () => void;
 }) {
   const stats = map.brawlerStats;
-
   const firstPick = pickFirstPick(stats);
   const safePick = pickSafest(stats);
   const riskPick = pickHighRiskHighReward(stats);
@@ -392,13 +391,13 @@ function MapDetail({
       <div className="grid grid-cols-3 gap-3 mb-5">
         {firstPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-[10px] text-text-tertiary uppercase mb-2">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               Best first pick
             </div>
-            <div className="text-base font-medium text-yellow-400">
+            <div className="text-base font-medium" style={{ color: "#EF9F27" }}>
               {firstPick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary font-mono">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {firstPick.winRate}% WR · {firstPick.pickRate}% pick
             </div>
           </div>
@@ -406,13 +405,13 @@ function MapDetail({
 
         {safePick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-[10px] text-text-tertiary uppercase mb-2">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               Safest pick
             </div>
-            <div className="text-base font-medium text-green-400">
+            <div className="text-base font-medium" style={{ color: "#5DCAA5" }}>
               {safePick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary font-mono">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {safePick.winRate}% WR · {safePick.pickRate}% pick
             </div>
           </div>
@@ -420,88 +419,102 @@ function MapDetail({
 
         {riskPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
-            <div className="text-[10px] text-text-tertiary uppercase mb-2">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
               High risk / reward
             </div>
-            <div className="text-base font-medium text-pink-400">
+            <div className="text-base font-medium" style={{ color: "#ED93B1" }}>
               {riskPick.brawler.name}
             </div>
-            <div className="text-[11px] text-text-tertiary font-mono">
+            <div className="text-[11px] text-text-tertiary mt-0.5 font-mono">
               {riskPick.winRate}% WR · {riskPick.pickRate}% pick (niche)
             </div>
           </div>
         )}
       </div>
 
-      {/* TABLE */}
-      <div className="bg-bg-primary border border-border rounded-xl p-4">
-        <div className="text-sm font-medium mb-3">
-          Top brawlers on {map.name}
-        </div>
+     {/* TABLE */}
+<div className="bg-bg-primary border border-border rounded-xl p-4">
+  <div className="text-sm font-medium mb-3">
+    Top brawlers on {map.name}
+  </div>
 
-        <div className="grid grid-cols-[20px_28px_28px_1fr_120px_60px_56px] gap-3 text-[10px] text-text-tertiary pb-2 border-b">
-          <span>#</span>
-          <span></span>
-          <span></span>
-          <span>Brawler</span>
-          <span>Type</span>
-          <span className="text-right">Win%</span>
-          <span className="text-right">Pick%</span>
-        </div>
+  {/* HEADER */}
+  <div className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center text-[10px] text-text-tertiary tracking-widest pb-2 border-b border-border">
+    <span>#</span>
+    <span></span>
+    <span></span>
+    <span>Brawler</span>
+    <span>Type</span>
+    <span className="text-left sm:text-right pr-1">Win%</span>
+    <span className="text-left sm:text-right pr-2">Pick%</span>
+  </div> {/*  THIS WAS MISSING */}
 
-        {stats.map((s, i) => {
-          const tierColor = safeLookup(TIER_COLORS as any, s.tier, "#888");
+  {/* ROWS */}
+  {stats.map((s, i) => {
+    const tierColor =
+      (TIER_COLORS as Record<string, string>)[s.tier] ?? "#888";
 
-          return (
-            <div
-              key={s.id}
-              className="grid grid-cols-[20px_28px_28px_1fr_120px_60px_56px] gap-3 items-center py-2 border-b last:border-none"
-            >
-              <span className="text-xs font-mono">{i + 1}</span>
+    return (
+      <div
+        key={s.id}
+        className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center py-2 border-b border-border last:border-none"
+      >
+        <span className="text-xs text-text-tertiary font-mono">
+          {i + 1}
+        </span>
 
-              <span
-                className="text-xs font-semibold rounded w-[22px] h-[22px] flex items-center justify-center"
-                style={{
-                  background: tierColor + "22",
-                  color: tierColor,
-                }}
-              >
-                {s.tier}
-              </span>
+        <span
+          className="text-xs font-semibold rounded-md w-[22px] h-[22px] inline-flex items-center justify-center"
+          style={{
+            background: tierColor + "22",
+            color: tierColor,
+          }}
+        >
+          {s.tier}
+        </span>
 
-              <BrawlerPortrait
-                name={s.brawler.name}
-                iconUrl={s.brawler.iconUrl}
-                externalId={s.brawler.externalId}
-                size="sm"
-              />
+        <BrawlerPortrait
+          name={s.brawler.name}
+          iconUrl={s.brawler.iconUrl}
+          externalId={s.brawler.externalId}
+          size="sm"
+        />
 
-              <span className="text-sm truncate">
-                {s.brawler.name}
-              </span>
+        <span className="text-sm font-medium truncate">
+          {s.brawler.name}
+        </span>
 
-              <span
-                className="text-[11px] px-2 py-0.5 rounded"
-                style={{
-                  background:
-                    safeLookup(TYPE_COLORS as any, s.brawler.type, "#555") + "22",
-                  color: safeLookup(TYPE_COLORS as any, s.brawler.type, "#ccc"),
-                }}
-              >
-                {safeLookup(TYPE_LABELS as any, s.brawler.type, s.brawler.type)}
-              </span>
+        <span
+          className="text-[11px] font-medium px-2 py-0.5 rounded-md w-fit"
+          style={{
+            background:
+              (TYPE_COLORS as Record<string, string>)[
+                s.brawler.type
+              ] + "22",
+            color:
+              (TYPE_COLORS as Record<string, string>)[
+                s.brawler.type
+              ],
+          }}
+        >
+          {(TYPE_LABELS as Record<string, string>)[
+            s.brawler.type
+          ] || s.brawler.type}
+        </span>
 
-              <span className="text-sm font-mono text-right">
-                {s.winRate}%
-              </span>
+        {/* Win */}
+        <span className="text-sm font-semibold font-mono text-left sm:text-right tabular-nums pr-1">
+          {s.winRate}%
+        </span>
 
-              <span className="text-sm text-right font-mono">
-                {s.pickRate}%
-              </span>
-            </div>
-          );
-        })}
+        {/* Pick */}
+        <span className="text-sm font-mono text-left sm:text-right text-text-secondary tabular-nums pr-2">
+          {s.pickRate}%
+        </span>
       </div>
-    </div>
+    );
+  })}
+</div>
+</div>
   );
 }
