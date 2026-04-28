@@ -1,5 +1,4 @@
 "use client";
-
 import { useMemo, useState } from "react";
 import {
   TIER_COLORS,
@@ -17,9 +16,8 @@ import { BrawlerPortrait } from "@/components/BrawlerPortrait";
 import { MapImage } from "@/components/MapImage";
 
 /* -------------------------------------------------------------------------- */
-/* TYPES */
+/* TYPES                                                                      */
 /* -------------------------------------------------------------------------- */
-
 interface BrawlerStat {
   id: string;
   winRate: number;
@@ -39,7 +37,6 @@ interface BrawlerStat {
     externalId: number | null;
   };
 }
-
 interface MapData {
   id: string;
   name: string;
@@ -47,19 +44,16 @@ interface MapData {
   gameMode: { id: string; name: string; icon: string };
   brawlerStats: BrawlerStat[];
 }
-
 interface ModeData {
   id: string;
   name: string;
   icon: string;
 }
-
 type Layout = "grouped" | "flat";
 
 /* -------------------------------------------------------------------------- */
-/* SAFE HELPERS */
+/* SAFE HELPERS                                                               */
 /* -------------------------------------------------------------------------- */
-
 const FALLBACK_MODE_COLOR = "#B4B2A9";
 
 function safeLookup<T>(
@@ -70,11 +64,9 @@ function safeLookup<T>(
   if (!obj || typeof obj !== "object") return fallback;
   return obj[key] ?? fallback;
 }
-
 function modeColor(modeName: string): string {
   return safeLookup(MODE_COLORS, modeName, FALLBACK_MODE_COLOR);
 }
-
 function modeGlyph(modeName: string): string {
   return safeLookup(
     MODE_ICONS,
@@ -82,11 +74,9 @@ function modeGlyph(modeName: string): string {
     modeName.slice(0, 2).toUpperCase()
   );
 }
-
 /* safer top pick */
 function getTopBrawler(stats: BrawlerStat[]): BrawlerStat | null {
   if (!stats || stats.length === 0) return null;
-
   return (
     stats.find((b) => b.isReal) ||
     stats.reduce((best, curr) =>
@@ -96,9 +86,8 @@ function getTopBrawler(stats: BrawlerStat[]): BrawlerStat | null {
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAIN COMPONENT */
+/* MAIN COMPONENT                                                             */
 /* -------------------------------------------------------------------------- */
-
 export function MapList({
   maps,
   modes,
@@ -117,13 +106,11 @@ export function MapList({
 
   const grouped = useMemo(() => {
     const buckets = new Map<string, MapData[]>();
-
     for (const m of filtered) {
       const key = m.gameMode.name;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key)!.push(m);
     }
-
     return Array.from(buckets.entries())
       .map(([name, maps]) => ({ name, maps }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -153,7 +140,6 @@ export function MapList({
             />
           ))}
         </div>
-
         <LayoutToggle value={layout} onChange={setLayout} />
       </div>
 
@@ -169,7 +155,7 @@ export function MapList({
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
           {filtered.map((map) => (
             <MapCard key={map.id} map={map} onClick={() => setSelectedMap(map)} />
           ))}
@@ -186,9 +172,8 @@ export function MapList({
 }
 
 /* -------------------------------------------------------------------------- */
-/* MODE SECTION */
+/* MODE SECTION                                                               */
 /* -------------------------------------------------------------------------- */
-
 function ModeSection({
   modeName,
   maps,
@@ -200,7 +185,6 @@ function ModeSection({
 }) {
   const color = modeColor(modeName);
   const glyph = modeGlyph(modeName);
-
   return (
     <section>
       <header
@@ -220,8 +204,7 @@ function ModeSection({
           {maps.length} maps
         </span>
       </header>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
         {maps.map((map) => (
           <MapCard key={map.id} map={map} onClick={() => onSelect(map)} />
         ))}
@@ -231,9 +214,8 @@ function ModeSection({
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAP CARD */
+/* MAP CARD                                                                   */
 /* -------------------------------------------------------------------------- */
-
 function MapCard({
   map,
   onClick,
@@ -243,7 +225,6 @@ function MapCard({
 }) {
   const top = getTopBrawler(map.brawlerStats);
   const color = modeColor(map.gameMode.name);
-
   return (
     <button
       onClick={onClick}
@@ -252,35 +233,31 @@ function MapCard({
     >
       <div className="relative">
         <MapImage name={map.name} imageUrl={map.imageUrl} modeName={map.gameMode.name} size="portrait" />
-
         {top && (
-          <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-black/80">
+          <div className="absolute top-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/80">
             <BrawlerPortrait
               name={top.brawler.name}
               iconUrl={top.brawler.iconUrl}
               externalId={top.brawler.externalId}
               size="xs"
             />
-            <span className="text-xs font-mono">{top.winRate}%</span>
+            <span className="text-[10px] font-mono">{top.winRate}%</span>
           </div>
         )}
-
         <span className="absolute bottom-2 left-2 text-xs font-mono">
           {modeGlyph(map.gameMode.name)}
         </span>
       </div>
-
-      <div className="p-3">
-        <div className="text-sm font-medium">{map.name}</div>
+      <div className="px-2 py-1.5">
+        <div className="text-xs font-medium truncate">{map.name}</div>
       </div>
     </button>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* TOGGLES */
+/* TOGGLES                                                                    */
 /* -------------------------------------------------------------------------- */
-
 function LayoutToggle({
   value,
   onChange,
@@ -299,7 +276,6 @@ function LayoutToggle({
     </div>
   );
 }
-
 function ToggleButton({
   active,
   onClick,
@@ -318,7 +294,6 @@ function ToggleButton({
     </button>
   );
 }
-
 function FilterButton({
   label,
   active,
@@ -339,9 +314,8 @@ function FilterButton({
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAP DETAIL (UNCHANGED CORE) */
+/* MAP DETAIL (UNCHANGED CORE)                                                */
 /* -------------------------------------------------------------------------- */
-
 function MapDetail({
   map,
   onBack,
@@ -353,7 +327,6 @@ function MapDetail({
   const firstPick = pickFirstPick(stats);
   const safePick = pickSafest(stats);
   const riskPick = pickHighRiskHighReward(stats);
-
   return (
     <div>
       {/* Back */}
@@ -363,7 +336,6 @@ function MapDetail({
       >
         &larr; Back to maps
       </button>
-
       {/* Hero */}
       <div className="mb-5">
         <MapImage
@@ -373,7 +345,6 @@ function MapDetail({
           size="hero"
         />
       </div>
-
       {/* Header */}
       <div className="flex items-center gap-3 mb-5">
         <span className="text-xs font-mono bg-bg-secondary px-2 py-1 rounded text-text-tertiary">
@@ -386,7 +357,6 @@ function MapDetail({
           </span>
         </div>
       </div>
-
       {/* Picks */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {firstPick && (
@@ -402,7 +372,6 @@ function MapDetail({
             </div>
           </div>
         )}
-
         {safePick && (
           <div className="bg-bg-secondary rounded-lg p-4">
             <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
@@ -416,7 +385,6 @@ function MapDetail({
             </div>
           </div>
         )}
-
         {riskPick && (
           <div className="bg-bg-secondary rounded-lg p-4">
             <div className="text-[10px] text-text-tertiary uppercase tracking-widest mb-2">
@@ -431,90 +399,80 @@ function MapDetail({
           </div>
         )}
       </div>
-
-     {/* TABLE */}
-<div className="bg-bg-primary border border-border rounded-xl p-4">
-  <div className="text-sm font-medium mb-3">
-    Top brawlers on {map.name}
-  </div>
-
-  {/* HEADER */}
-  <div className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center text-[10px] text-text-tertiary tracking-widest pb-2 border-b border-border">
-    <span>#</span>
-    <span></span>
-    <span></span>
-    <span>Brawler</span>
-    <span>Type</span>
-    <span className="text-left sm:text-right pr-1">Win%</span>
-    <span className="text-left sm:text-right pr-2">Pick%</span>
-  </div> {/*  THIS WAS MISSING */}
-
-  {/* ROWS */}
-  {stats.map((s, i) => {
-    const tierColor =
-      (TIER_COLORS as Record<string, string>)[s.tier] ?? "#888";
-
-    return (
-      <div
-        key={s.id}
-        className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center py-2 border-b border-border last:border-none"
-      >
-        <span className="text-xs text-text-tertiary font-mono">
-          {i + 1}
-        </span>
-
-        <span
-          className="text-xs font-semibold rounded-md w-[22px] h-[22px] inline-flex items-center justify-center"
-          style={{
-            background: tierColor + "22",
-            color: tierColor,
-          }}
-        >
-          {s.tier}
-        </span>
-
-        <BrawlerPortrait
-          name={s.brawler.name}
-          iconUrl={s.brawler.iconUrl}
-          externalId={s.brawler.externalId}
-          size="sm"
-        />
-
-        <span className="text-sm font-medium truncate">
-          {s.brawler.name}
-        </span>
-
-        <span
-          className="text-[11px] font-medium px-2 py-0.5 rounded-md w-fit"
-          style={{
-            background:
-              (TYPE_COLORS as Record<string, string>)[
-                s.brawler.type
-              ] + "22",
-            color:
-              (TYPE_COLORS as Record<string, string>)[
-                s.brawler.type
-              ],
-          }}
-        >
-          {(TYPE_LABELS as Record<string, string>)[
-            s.brawler.type
-          ] || s.brawler.type}
-        </span>
-
-        {/* Win */}
-        <span className="text-sm font-semibold font-mono text-left sm:text-right tabular-nums pr-1">
-          {s.winRate}%
-        </span>
-
-        {/* Pick */}
-        <span className="text-sm font-mono text-left sm:text-right text-text-secondary tabular-nums pr-2">
-          {s.pickRate}%
-        </span>
+      {/* TABLE */}
+      <div className="bg-bg-primary border border-border rounded-xl p-4">
+        <div className="text-sm font-medium mb-3">
+          Top brawlers on {map.name}
+        </div>
+        {/* HEADER */}
+        <div className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center text-[10px] text-text-tertiary tracking-widest pb-2 border-b border-border">
+          <span>#</span>
+          <span></span>
+          <span></span>
+          <span>Brawler</span>
+          <span>Type</span>
+          <span className="text-left sm:text-right pr-1">Win%</span>
+          <span className="text-left sm:text-right pr-2">Pick%</span>
+        </div>
+        {/* ROWS */}
+        {stats.map((s, i) => {
+          const tierColor =
+            (TIER_COLORS as Record<string, string>)[s.tier] ?? "#888";
+          return (
+            <div
+              key={s.id}
+              className="grid grid-cols-[20px_26px_30px_1fr_100px_70px_65px] gap-1.5 items-center py-2 border-b border-border last:border-none"
+            >
+              <span className="text-xs text-text-tertiary font-mono">
+                {i + 1}
+              </span>
+              <span
+                className="text-xs font-semibold rounded-md w-[22px] h-[22px] inline-flex items-center justify-center"
+                style={{
+                  background: tierColor + "22",
+                  color: tierColor,
+                }}
+              >
+                {s.tier}
+              </span>
+              <BrawlerPortrait
+                name={s.brawler.name}
+                iconUrl={s.brawler.iconUrl}
+                externalId={s.brawler.externalId}
+                size="sm"
+              />
+              <span className="text-sm font-medium truncate">
+                {s.brawler.name}
+              </span>
+              <span
+                className="text-[11px] font-medium px-2 py-0.5 rounded-md w-fit"
+                style={{
+                  background:
+                    (TYPE_COLORS as Record<string, string>)[
+                      s.brawler.type
+                    ] + "22",
+                  color:
+                    (TYPE_COLORS as Record<string, string>)[
+                      s.brawler.type
+                    ],
+                }}
+              >
+                {(TYPE_LABELS as Record<string, string>)[
+                  s.brawler.type
+                ] || s.brawler.type}
+              </span>
+              {/* Win */}
+              <span className="text-sm font-semibold font-mono text-left sm:text-right tabular-nums pr-1">
+                {s.winRate}%
+              </span>
+              {/* Pick */}
+              <span className="text-sm font-mono text-left sm:text-right text-text-secondary tabular-nums pr-2">
+                {s.pickRate}%
+              </span>
+            </div>
+          );
+        })}
       </div>
-    );
-  })}
-</div>
-</div>
+    </div>
   );
 }
