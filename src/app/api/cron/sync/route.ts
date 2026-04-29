@@ -5,6 +5,7 @@ import {
   syncCounterMatchups,
   syncMapBrawlerStats,
 } from "@/services/brawler-sync";
+import { syncMaps } from "@/services/map-sync";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   const start = Date.now();
 
   try {
+    // 1. Brawlers (and counter matchups + per-map stat seeds if new brawlers)
     const brawlerResult = await syncBrawlerData(prisma);
     let matchups = 0;
     let stats = 0;
@@ -29,6 +31,12 @@ export async function POST(request: Request) {
       matchups = matchupResult.total;
       stats = await syncMapBrawlerStats(prisma);
     }
+
+    // 2. Maps — must run before aggregate cron so new maps aren't dropped
+    //    by the map-filter step in stat-aggregator. Previously this only
+    //    ran via scripts/pipeline.ts locally, which meant prod's Map
+    //    table drifted out of date and battles silently went unmatched.
+    const mapResult = await syncMaps(prisma);
 
     return NextResponse.json({
       ok: true,
@@ -39,9 +47,17 @@ export async function POST(request: Request) {
         created: brawlerResult.created,
         updated: brawlerResult.updated,
       },
+      maps: {
+        fetched: mapResult.fetched,
+        tracked: mapResult.filteredIn,
+        created: mapResult.created,
+        updated: mapResult.updated,
+        skipped: mapResult.skipped,
+        untrackedModes: mapResult.unmatchedModes,
+      },
       matchups,
       stats,
-      errors: brawlerResult.errors,
+      errors: [...brawlerResult.errors, ...mapResult.errors],
     });
   } catch (error: any) {
     return NextResponse.json(

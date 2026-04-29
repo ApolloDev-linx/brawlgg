@@ -40,6 +40,16 @@
  *   them out), so those battles naturally don't match any map row and
  *   get excluded from per-map stats. They DO still count toward overall
  *   BrawlerStat totals though, since the brawler still played them.
+ *
+ * Note on map-name pooling:
+ *   The grouped[] structure keys on raw mapName from BattleRecord, so
+ *   casing variants ("Ring Of Fire" vs "Ring of Fire") sit in separate
+ *   buckets even though they resolve to the same Map row via case-
+ *   insensitive lookup. We pool buckets by canonical mapId before the
+ *   per-brawler upsert — without pooling, each variant's upsert would
+ *   overwrite the previous one and we'd lose battles. Belt-and-suspenders
+ *   alongside the dedup script: even if dupes reappear, the math stays
+ *   honest.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -67,17 +77,6 @@ function getTier(winRate: number): string {
   return "C";
 }
 
-function getPickCategory(
-  winRate: number,
-  pickRate: number,
-  banRate: number
-): string | null {
-  if (winRate >= 54 && pickRate >= 8) return "first_pick";
-  if (winRate >= 51 && banRate < 3) return "safe";
-  if (winRate >= 53 && banRate >= 5) return "high_risk";
-  return null;
-}
-
 export interface AggregationResult {
   mapsProcessed: number;
   brawlersUpdated: number;
@@ -89,7 +88,7 @@ export interface AggregationResult {
   battlesExcludedByMode: number;
   /** Battles with a tracked mode but a mapName we don't have in the Map table. */
   battlesExcludedByMap: number;
-  /** Top 10 excluded (mode, map, count) for diagnostics. */
+  /** Top 10 excluded modes by count, for diagnostics. */
   excludedModesBreakdown: { mode: string; count: number }[];
 }
 
@@ -105,7 +104,7 @@ export async function aggregateStats(): Promise<AggregationResult> {
     excludedModesBreakdown: [],
   };
 
-  // Pull everything — gameMode now included so we can filter at read time.
+  // Pull everything — gameMode included so we can filter at read time.
   const battles = await prisma.battleRecord.findMany({
     select: {
       mapName: true,
@@ -129,7 +128,6 @@ export async function aggregateStats(): Promise<AggregationResult> {
   > = {};
 
   for (const b of battles) {
-    // Filter 1: mode allowlist
     if (!TRACKED_MODES.has(b.gameMode)) {
       result.battlesExcludedByMode++;
       excludedByMode[b.gameMode] = (excludedByMode[b.gameMode] ?? 0) + 1;
@@ -147,35 +145,83 @@ export async function aggregateStats(): Promise<AggregationResult> {
     if (!entry.brawlerId && b.brawlerId) entry.brawlerId = b.brawlerId;
   }
 
-  // Build breakdown sorted by count desc, top 10
+  // Top 10 excluded-mode breakdown for /debug/stats.
   result.excludedModesBreakdown = Object.entries(excludedByMode)
     .map(([mode, count]) => ({ mode, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
+  // Lookup tables — both case-insensitive on the read side. The
+  // canonicalization layer (toBrawlerName, normalizeMapName) means the
+  // names in BattleRecord and the dictionary tables agree at least case-
+  // insensitively. Punctuation differences are handled by the dedup
+  // script for Map; the canonical Map row owns its variants.
   const dbMaps = await prisma.map.findMany({ select: { id: true, name: true } });
   const mapIdByName: Record<string, string> = {};
   for (const m of dbMaps) mapIdByName[m.name.toLowerCase()] = m.id;
 
-  const dbBrawlers = await prisma.brawler.findMany({ select: { id: true, name: true } });
+  const dbBrawlers = await prisma.brawler.findMany({
+    select: { id: true, name: true },
+  });
   const brawlerIdByName: Record<string, string> = {};
   for (const b of dbBrawlers) brawlerIdByName[b.name.toLowerCase()] = b.id;
 
   const processedMaps = new Set<string>();
 
+  // Pool BattleRecord buckets by canonical mapId BEFORE the per-brawler
+  // upsert. Multiple mapName spellings can resolve to the same Map row
+  // ("Ring Of Fire" + "Ring of Fire" → same id); without pooling, the
+  // second upsert overwrites the first and battles get lost.
+  type BrawlerBucket = {
+    wins: number;
+    total: number;
+    brawlerId: string | null;
+  };
+  const pooledByMapId: Record<string, Record<string, BrawlerBucket>> = {};
+
   for (const mapName of Object.keys(grouped)) {
+    const sourceBucket = grouped[mapName];
+    if (!sourceBucket) continue;
+
     const mapId = mapIdByName[mapName.toLowerCase()];
+
     if (!mapId) {
-      // Count battles on unmatched maps toward the by-map exclusion tally
-      const brawlerMap = grouped[mapName];
-      for (const bname of Object.keys(brawlerMap)) {
-        result.battlesExcludedByMap += brawlerMap[bname].total;
+      for (const bname of Object.keys(sourceBucket)) {
+        const s = sourceBucket[bname];
+        if (s) result.battlesExcludedByMap += s.total;
       }
       continue;
     }
 
     processedMaps.add(mapName);
-    const brawlerMap = grouped[mapName];
+    if (!pooledByMapId[mapId]) pooledByMapId[mapId] = {};
+    const dest = pooledByMapId[mapId]!;
+
+    for (const brawlerName of Object.keys(sourceBucket)) {
+      const stats = sourceBucket[brawlerName];
+      if (!stats) continue;
+
+      let bucket = dest[brawlerName];
+      if (!bucket) {
+        bucket = { wins: 0, total: 0, brawlerId: stats.brawlerId };
+        dest[brawlerName] = bucket;
+      }
+      bucket.wins += stats.wins;
+      bucket.total += stats.total;
+      if (!bucket.brawlerId && stats.brawlerId) {
+        bucket.brawlerId = stats.brawlerId;
+      }
+    }
+  }
+
+  // Per-mapId, per-brawler upserts. pickCategory is intentionally NOT
+  // written — banRate is hardcoded 0 (no ban data from the API), so the
+  // old threshold-based bucket logic always picked the wrong category.
+  // Live selectors in src/lib/stats-utils.ts compute callouts at render
+  // time using winRate + pickRate + isReal — the only real signals.
+  for (const mapId of Object.keys(pooledByMapId)) {
+    const brawlerMap = pooledByMapId[mapId];
+    if (!brawlerMap) continue;
 
     const totalPicksOnMap = Object.values(brawlerMap).reduce(
       (s, v) => s + v.total,
@@ -184,67 +230,53 @@ export async function aggregateStats(): Promise<AggregationResult> {
 
     for (const brawlerName of Object.keys(brawlerMap)) {
       const stats = brawlerMap[brawlerName];
+      if (!stats) continue;
+
       const brawlerId =
         stats.brawlerId ?? brawlerIdByName[brawlerName.toLowerCase()] ?? null;
-
       if (!brawlerId) continue;
 
-      const winRate = stats.total > 0
-        ? Math.round((stats.wins / stats.total) * 1000) / 10
-        : 50;
-
-      const pickRate = totalPicksOnMap > 0
-        ? Math.round((stats.total / totalPicksOnMap) * 1000) / 10
-        : 0;
-
+      const winRate =
+        stats.total > 0
+          ? Math.round((stats.wins / stats.total) * 1000) / 10
+          : 50;
+      const pickRate =
+        totalPicksOnMap > 0
+          ? Math.round((stats.total / totalPicksOnMap) * 1000) / 10
+          : 0;
       const isReal = stats.total >= MIN_SAMPLE;
       const tier = getTier(winRate);
-      const pickCategory = getPickCategory(winRate, pickRate, 0);
 
       result.battlesCounted += stats.total;
 
       try {
-        const existing = await prisma.mapBrawlerStat.findUnique({
+        await prisma.mapBrawlerStat.upsert({
           where: { mapId_brawlerId: { mapId, brawlerId } },
+          update: {
+            winRate,
+            pickRate,
+            banRate: 0,
+            tier,
+            sampleSize: stats.total,
+            isReal,
+            computedAt: new Date(),
+          },
+          create: {
+            mapId,
+            brawlerId,
+            winRate,
+            pickRate,
+            banRate: 0,
+            tier,
+            sampleSize: stats.total,
+            isReal,
+          },
         });
-
-        if (existing) {
-          if (!existing.isReal || isReal) {
-            await prisma.mapBrawlerStat.update({
-              where: { mapId_brawlerId: { mapId, brawlerId } },
-              data: {
-                winRate,
-                pickRate,
-                banRate: existing.isReal ? existing.banRate : 0,
-                tier,
-                pickCategory,
-                sampleSize: stats.total,
-                isReal,
-                computedAt: new Date(),
-              },
-            });
-            result.brawlersUpdated++;
-            if (isReal) result.realStatsCount++;
-          }
-        } else {
-          await prisma.mapBrawlerStat.create({
-            data: {
-              mapId,
-              brawlerId,
-              winRate,
-              pickRate,
-              banRate: 0,
-              tier,
-              pickCategory,
-              sampleSize: stats.total,
-              isReal,
-            },
-          });
-          result.brawlersUpdated++;
-          if (isReal) result.realStatsCount++;
-        }
+        result.brawlersUpdated++;
+        if (isReal) result.realStatsCount++;
       } catch {
-        // continue on individual failures
+        // Continue on individual failures — one bad row shouldn't kill
+        // the whole aggregation pass.
       }
     }
   }
@@ -264,7 +296,7 @@ export async function aggregateStats(): Promise<AggregationResult> {
  *
  * Why this exists separately from per-map aggregation:
  *   - Per-map (MapBrawlerStat) drops battles whose mapName isn't in
- *     our Map table — currently ~18% of data
+ *     our Map table — currently ~17% of data, mostly 5v5 contamination
  *   - Averaging MapBrawlerStat rows weighted by sampleSize then INHERITS
  *     that bias, so a brawler that performs differently on
  *     unmapped-but-tracked maps shows up wrong on the dashboard

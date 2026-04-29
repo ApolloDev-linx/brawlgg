@@ -28,21 +28,32 @@ config({ path: ".env.local", override: true });
 const BASE_URL = process.env.BRAWL_STARS_PROXY_URL || "https://api.brawlstars.com/v1";
 console.log("[debug] BASE_URL:", BASE_URL);
 
-async function apiFetch<T>(path: string): Promise<T> {
+async function apiFetch<T>(path: string, attempt = 0): Promise<T> {
   const apiKey = process.env.BRAWL_STARS_API_KEY;
   if (!apiKey) throw new Error("BRAWL_STARS_API_KEY not set in .env");
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
   });
+
   if (res.status === 429) {
-    console.log("\n[harvest] Rate limited, waiting 10s...");
-    await sleep(10_000);
-    return apiFetch(path);
+    if (attempt >= 5) {
+      throw new Error(
+        `Rate limited 5 times in a row on ${path} — bailing instead of recursing forever`
+      );
+    }
+    // Exponential-ish backoff. 10s, 20s, 40s, 80s, 160s. Caps total wait
+    // at ~5min before we give up on this player and move on.
+    const wait = 10_000 * Math.pow(2, attempt);
+    console.log(
+      `\n[harvest] Rate limited (attempt ${attempt + 1}/6), waiting ${wait / 1000}s...`
+    );
+    await sleep(wait);
+    return apiFetch(path, attempt + 1);
   }
+
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json();
 }
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function parseBattleTime(raw: string): Date | null {
