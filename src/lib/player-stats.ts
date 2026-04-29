@@ -113,9 +113,13 @@ export function computeAccountEconomy(brawlers: BrawlerLite[]): AccountEconomy {
 // Four weighted components, each capped so a single dimension can't
 // carry the whole score:
 //
-//   Peak (35pts)       : highestTrophies / 60000, capped at 1.
-//                        60k is roughly "very high" — only top players
-//                        cross it. This is the "ceiling reached" signal.
+//   Trophies (35pts)   : trophies / 60000, capped at 1.
+//                        60k is roughly "very high" — only strong
+//                        active players cross it. Uses current trophies
+//                        rather than highestTrophies because the Feb 2026
+//                        rework removed seasonal resets, making the
+//                        "peak" field a stale legacy stat that no longer
+//                        meaningfully exceeds current.
 //
 //   Recent form (25)   : recent win rate over last ~25 battles.
 //                        50% wins = 12.5 pts. Active players above 50%
@@ -137,7 +141,7 @@ export interface ApolloScore {
   score: number;
   tier: "S" | "A" | "B" | "C" | "D";
   breakdown: {
-    peak: number;
+    trophies: number;
     recentForm: number;
     depth: number;
     starPlayer: number;
@@ -145,12 +149,12 @@ export interface ApolloScore {
 }
 
 export function computeApolloScore(input: {
-  highestTrophies: number;
+  trophies: number;
   recentWinRate: number; // 0-100
   maxedCount: number;
   starPlayerRate: number; // 0-100
 }): ApolloScore {
-  const peak = Math.round(Math.min(input.highestTrophies / 60000, 1) * 35);
+  const trophies = Math.round(Math.min(input.trophies / 100000, 1) * 35);
   const recentForm = Math.round(
     Math.min(Math.max(input.recentWinRate, 0), 100) / 100 * 25
   );
@@ -158,7 +162,7 @@ export function computeApolloScore(input: {
   const starPlayer = Math.round(
     Math.min(Math.max(input.starPlayerRate, 0) / 30, 1) * 15
   );
-  const score = peak + recentForm + depth + starPlayer;
+  const score = trophies + recentForm + depth + starPlayer;
 
   let tier: ApolloScore["tier"];
   if (score >= 85) tier = "S";
@@ -167,7 +171,7 @@ export function computeApolloScore(input: {
   else if (score >= 40) tier = "C";
   else tier = "D";
 
-  return { score, tier, breakdown: { peak, recentForm, depth, starPlayer } };
+  return { score, tier, breakdown: { trophies, recentForm, depth, starPlayer } };
 }
 
 /* -------------------------------------------------------------------------- */

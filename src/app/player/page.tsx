@@ -32,7 +32,7 @@ interface ApolloScore {
   score: number;
   tier: "S" | "A" | "B" | "C" | "D";
   breakdown: {
-    peak: number;
+    trophies: number;
     recentForm: number;
     depth: number;
     starPlayer: number;
@@ -312,20 +312,15 @@ function ProfileHeader({ player }: { player: PlayerData }) {
         </div>
 
         {/* Trophies block */}
-        <div className="flex items-baseline gap-2 shrink-0">
-          <div>
-            <div className="text-[10px] text-text-tertiary tracking-widest uppercase">
-              Trophies
-            </div>
-            <div
-              className="text-xl font-medium font-mono tabular-nums"
-              style={{ color: "#EF9F27" }}
-            >
-              {player.trophies.toLocaleString()}
-            </div>
+        <div className="shrink-0">
+          <div className="text-[10px] text-text-tertiary tracking-widest uppercase">
+            Trophies
           </div>
-          <div className="text-[10px] text-text-tertiary self-end mb-0.5">
-            peak {player.highestTrophies.toLocaleString()}
+          <div
+            className="text-xl font-medium font-mono tabular-nums"
+            style={{ color: "#EF9F27" }}
+          >
+            {player.trophies.toLocaleString()}
           </div>
         </div>
 
@@ -521,8 +516,8 @@ function StatCard({
 function ApolloScoreCard({ apolloScore }: { apolloScore: ApolloScore }) {
   const components = [
     {
-      label: "Peak trophies",
-      value: apolloScore.breakdown.peak,
+      label: "Trophies",
+      value: apolloScore.breakdown.trophies,
       max: 35,
       color: "#EF9F27",
     },

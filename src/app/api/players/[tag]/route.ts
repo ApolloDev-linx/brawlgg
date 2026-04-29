@@ -120,7 +120,7 @@ export async function GET(
           const economy = computeAccountEconomy(ownedBrawlers);
           const recentForm = computeRecentForm(battleLogItems, tag);
           const apolloScore = computeApolloScore({
-            highestTrophies: player.highestTrophies,
+            trophies: player.trophies,
             recentWinRate: recentForm.winRate,
             maxedCount: economy.maxedCount,
             starPlayerRate: recentForm.starPlayerRate,
@@ -283,7 +283,7 @@ function generateMockPlayer(
   const economy = computeAccountEconomy(ownedBrawlers);
   const recentForm = computeRecentForm(items, tag);
   const apolloScore = computeApolloScore({
-    highestTrophies,
+    trophies: totalTrophies,
     recentWinRate: recentForm.winRate,
     maxedCount: economy.maxedCount,
     starPlayerRate: recentForm.starPlayerRate,
