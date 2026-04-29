@@ -44,9 +44,8 @@ export default async function DraftPage() {
       <div className="mb-5">
         <h1 className="text-lg font-medium mb-1">Draft simulator</h1>
         <p className="text-sm text-text-secondary">
-          Simulate ranked draft with AI-powered pick and ban suggestions
-        </p>
-      </div>
+          Simulate ranked draft with our custom draft engine
+        </p>      </div>
 
       {brawlers.length === 0 ? (
         <div className="bg-bg-secondary rounded-xl p-8 text-center text-sm text-text-secondary">

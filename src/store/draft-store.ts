@@ -8,7 +8,7 @@ interface DraftStore extends DraftState {
   reset: () => void;
 }
 
-const MAX_BANS = 4; // 2 per team
+const MAX_BANS = 6; // 3 per team, matching real ranked
 const MAX_PICKS = 3;
 
 const initialState: DraftState = {

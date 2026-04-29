@@ -334,7 +334,7 @@ export const BRAWLER_TYPE_OVERRIDES: Record <
   // --- Starters / Trophy Road ---
   "Shelly":   { role: "Damage",   type: "lane" },
   "Nita":     { role: "Damage",   type: "lane" },
-  "Colt":     { role: "Sniper",   type: "sniper" },
+  "Colt":     { role: "Damage",   type: "lane" },
   "Bull":     { role: "Tank",     type: "tank" },
   "Brock":    { role: "Sniper",   type: "sniper" },
   "El Primo": { role: "Tank",     type: "tank" },
