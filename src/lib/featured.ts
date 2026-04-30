@@ -28,8 +28,8 @@ export interface FeaturedClubConfig {
 }
 
 export const PLAYER_OF_MONTH: FeaturedPlayerConfig | null = {
-  tag: "#L9QCVP22",
-  blurb: "Use our website to be randomly chosen",
+  tag: "#2P8VJPUU",
+  blurb: "Imagination creates reality.",
 };
 
 export const FEATURED_CLUBS: FeaturedClubConfig[] = [
