@@ -1,27 +1,26 @@
 /**
  * battle-log-service.ts
  *
- * Fetches a player's battle log from the Brawl Stars API and saves
- * each battle into the BattleRecord table. Every player lookup seeds
- * our real stats dataset — no extra work needed.
+ * Fetches a player's battle log from the Brawl Stars API and persists
+ * each battle into BattleRecord. Called fire-and-forget from the player
+ * lookup route, so every player searched seeds our dataset for free.
+ *
+ * Intentionally parallel to scripts/harvest.ts and
+ * src/services/leaderboard-harvester.ts — same battle-shape parsing,
+ * same canonical-name layer, same per-brawler write loop. If you change
+ * one, change the others. A divergence here is exactly how Duels
+ * battles disappeared the first time around.
+ *
+ * Tracked modes (must match the other two harvesters):
+ *   Classic 3v3: Gem Grab, Brawl Ball, Bounty, Heist, Hot Zone,
+ *                Knockout, Siege
+ *   Plus:        Wipeout (3v3 variant), Duels (1v1)
+ *   Excluded:    Showdown variants, novelty/event modes, 2v2/5v5.
  */
 import { PrismaClient } from "@prisma/client";
 import { fetchPlayerBattleLog } from "./brawlstars-api";
 import { toBrawlerName } from "@/lib/brawler-name";
 
-const SUPPORTED_MODES = new Set([
-  "gemGrab",
-  "brawlBall",
-  "bounty",
-  "heist",
-  "hotZone",
-  "knockout",
-  "siege",
-  "duoShowdown",
-  "soloShowdown",
-]);
-
-// Only care about 3v3 competitive modes for meta stats
 const COMPETITIVE_MODES = new Set([
   "gemGrab",
   "brawlBall",
@@ -30,6 +29,8 @@ const COMPETITIVE_MODES = new Set([
   "hotZone",
   "knockout",
   "siege",
+  "wipeout",
+  "duels",
 ]);
 
 interface SaveResult {
@@ -39,27 +40,76 @@ interface SaveResult {
 }
 
 /**
+ * Most modes return `player.brawler` (singular). Duels returns
+ * `player.brawlers` (array of 3 picks per player). Returns [] if neither
+ * shape is present so the caller can skip cleanly.
+ */
+function extractBrawlers(player: any): { name: string }[] {
+  if (player?.brawler?.name) return [player.brawler];
+  if (Array.isArray(player?.brawlers)) {
+    return player.brawlers.filter(
+      (b: any): b is { name: string } => !!b?.name
+    );
+  }
+  return [];
+}
+
+/**
+ * Resolve the result string from this player's POV given the source
+ * player's `battle.result` and the team layout.
+ *
+ *   Team modes (battle.teams present): flip if player is on teams[1].
+ *   Duels (battle.teams empty):        flip if player isn't the source.
+ *   Draw:                              no flip ever.
+ */
+function resolveResultForPlayer(
+  player: any,
+  sourceTagWithHash: string,
+  teams: any[][],
+  battleResult: string
+): string {
+  if (battleResult === "draw") return battleResult;
+
+  if (teams.length > 0) {
+    const teamIndex = teams.findIndex((t) =>
+      t.some((p: any) => p.tag === player.tag)
+    );
+    if (teamIndex === 1) {
+      return battleResult === "victory" ? "defeat" : "victory";
+    }
+    return battleResult;
+  }
+
+  // Duels-style: no teams, flip the opponent's perspective
+  if (player.tag !== sourceTagWithHash) {
+    return battleResult === "victory" ? "defeat" : "victory";
+  }
+  return battleResult;
+}
+
+/**
  * Fetch a player's recent battle log and persist each battle to the DB.
- * Call this fire-and-forget from the player lookup route — it won't block
- * the response.
+ * Safe to fire-and-forget — it never throws and tracks all skips/errors
+ * in the returned counts so callers can log them if they care.
  */
 export async function saveBattleLog(
   prisma: PrismaClient,
   playerTag: string
 ): Promise<SaveResult> {
   const result: SaveResult = { saved: 0, skipped: 0, errors: 0 };
+
   let battleLog: any;
   try {
     battleLog = await fetchPlayerBattleLog(playerTag);
-  } catch (err) {
-    // No API key or player not found — silently skip
+  } catch {
+    // No API key, player not found, or upstream hiccup — degrade silently.
     return result;
   }
+
   const items: any[] = battleLog?.items || [];
   if (items.length === 0) return result;
 
-  // Build a name → id lookup for brawlers already in our DB.
-  // Lowercase keys so the lookup is case-insensitive.
+  // Build a case-insensitive name → id lookup for brawler attribution.
   const dbBrawlers = await prisma.brawler.findMany({
     select: { id: true, name: true },
   });
@@ -68,11 +118,13 @@ export async function saveBattleLog(
     brawlerIdByName.set(b.name.toLowerCase(), b.id);
   }
 
+  const sourceTagWithHash = `#${playerTag}`;
+
   for (const item of items) {
     try {
       const battle = item.battle;
       const event = item.event;
-      // Skip non-competitive or modes we don't track
+
       if (!event?.map || !battle?.mode) {
         result.skipped++;
         continue;
@@ -81,41 +133,52 @@ export async function saveBattleLog(
         result.skipped++;
         continue;
       }
-      if (battle.type === "friendly") {
+      if (battle.type === "friendly" || battle.type === "practice") {
         result.skipped++;
         continue;
       }
+
+      const battleResult = battle.result as string | undefined;
+      if (!battleResult) {
+        result.skipped++;
+        continue;
+      }
+
       const battleTime = new Date(item.battleTime);
-      const mapName = event.map;
-      const gameMode = battle.mode;
-      const result3v3 = battle.result as string | undefined; // "victory" | "defeat" | "draw"
-      if (!result3v3) {
+      if (isNaN(battleTime.getTime())) {
         result.skipped++;
         continue;
       }
-      // Flatten all players from all teams into individual records
+
+      const mapName: string = event.map;
+      const gameMode: string = battle.mode;
+      const starPlayerTag: string | undefined = battle.starPlayer?.tag;
+
       const teams: any[][] = battle.teams || [];
-      const starPlayerTag = battle.starPlayer?.tag;
-      for (const team of teams) {
-        for (const player of team) {
-          if (!player?.brawler?.name) continue;
-          const rawName = player.brawler.name as string;
-          // Canonical name via shared util — must match brawler-sync output
-          // so the lookup hits and battles get attributed to the right
-          // brawlerId. Handles "COLT" -> "Colt", "MR-P" -> "Mr. P", etc.
-          const brawlerName = toBrawlerName(rawName);
-          const brawlerId = brawlerIdByName.get(brawlerName.toLowerCase()) ?? null;
-          const isStarPlayer = player.tag === starPlayerTag;
-          // Each player in the battle sees the same result as the team that won
-          // We need to figure out which team this player is on vs the result
-          // The battle.result is from the perspective of the looked-up player's team
-          // We mark "victory" for the player's own team members
-          const sourceIsMyTeam = teams[0].some((p: any) => p.tag === `#${playerTag}`);
-          const teamIndex = teams.indexOf(team);
-          let playerResult = result3v3;
-          if (result3v3 === "victory" && teamIndex === 1) playerResult = "defeat";
-          if (result3v3 === "defeat" && teamIndex === 0) playerResult = "defeat";
-          if (result3v3 === "defeat" && teamIndex === 1) playerResult = "victory";
+      const allPlayers: any[] = battle.players ?? teams.flat();
+
+      for (const player of allPlayers) {
+        if (!player?.tag) continue;
+
+        const brawlers = extractBrawlers(player);
+        if (brawlers.length === 0) continue;
+
+        const playerResult = resolveResultForPlayer(
+          player,
+          sourceTagWithHash,
+          teams,
+          battleResult
+        );
+        const isStarPlayer = player.tag === starPlayerTag;
+
+        // Duels: write one row per brawler the player fielded (3 per
+        // duel, one row each, all sharing this player's result). Other
+        // modes: this loop runs exactly once.
+        for (const rawBrawler of brawlers) {
+          const brawlerName = toBrawlerName(rawBrawler.name);
+          const brawlerId =
+            brawlerIdByName.get(brawlerName.toLowerCase()) ?? null;
+
           try {
             await prisma.battleRecord.upsert({
               where: {
@@ -125,7 +188,7 @@ export async function saveBattleLog(
                   brawlerName,
                 },
               },
-              update: {}, // already have it, no need to overwrite
+              update: {},
               create: {
                 battleTime,
                 mapName,
@@ -139,13 +202,14 @@ export async function saveBattleLog(
             });
             result.saved++;
           } catch {
-            result.skipped++; // unique constraint hit = already saved
+            result.skipped++;
           }
         }
       }
-    } catch (err) {
+    } catch {
       result.errors++;
     }
   }
+
   return result;
 }
