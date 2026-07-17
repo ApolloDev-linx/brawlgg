@@ -104,7 +104,11 @@ function normalizeLookupKey(name: string): string {
 }
 
 async function fetchBrawlifyMaps(): Promise<BrawlifyMap[]> {
-  const res = await fetch("https://api.brawlify.com/v1/maps", {
+  // NOTE: was "https://api.brawlify.com/v1/maps" — wrong domain, returns
+  // 403. Every other caller in this codebase (brawlify-api.ts, seed.ts)
+  // uses api.brawlapi.com. Aligned here so this file stops being the
+  // odd one out.
+  const res = await fetch("https://api.brawlapi.com/v1/maps", {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(30_000),
   });

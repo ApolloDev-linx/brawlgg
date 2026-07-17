@@ -450,4 +450,12 @@ export const BRAWLER_TYPE_OVERRIDES: Record <
   "Najia":         { role: "Damage",   type: "lane" },
 
 
+  "Starr Nova": { role: "Assassin", type: "assassin" },
+
+  "Bolt": { role: "Tank", type: "tank" },
+
+  "Nori": { role: "assassin", type: "assassin" },
+
+  "Wendy": { role: "Support", type: "lane" },
+
 };

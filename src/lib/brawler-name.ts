@@ -33,6 +33,7 @@ export function toBrawlerName(raw: string): string {
     "mr-p": "Mr. P",
     "mr p": "Mr. P",
     "el-primo": "El Primo",
+    "sirus": "Sirius",
     // Keep legitimate hyphens:
     "8-bit": "8-Bit",
     "r-t": "R-T",

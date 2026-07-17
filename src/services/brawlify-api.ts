@@ -1,5 +1,5 @@
 const BASE_URL = "https://api.brawlapi.com/v1";
-const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 30_000;
 
 async function apiFetch<T>(path: string): Promise<T> {
   const controller = new AbortController();
